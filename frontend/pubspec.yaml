@@ -1,0 +1,45 @@
+name: senior_welfare_app
+description: "노인 복지 속보 알림 앱 - 최신 복지/일자리 공고를 실시간으로 알려드립니다."
+publish_to: "none"
+version: 1.0.0+1
+
+environment:
+  sdk: ">=3.3.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # Firebase
+  firebase_core: ^3.6.0
+  cloud_firestore: ^5.4.4
+  firebase_messaging: ^15.1.4
+
+  # WebView
+  webview_flutter: ^4.10.0
+
+  # 로컬 저장소 (지역 설정)
+  shared_preferences: ^2.3.3
+
+  # AdMob
+  google_mobile_ads: ^5.1.0
+
+  # URL 열기 (웹 대응)
+  url_launcher: ^6.3.0
+
+  # 시간 포맷
+  timeago: ^3.7.0
+
+  # 아이콘
+  cupertino_icons: ^1.0.8
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+
+flutter:
+  uses-material-design: true
+
+  # 한글 폰트 (Noto Sans KR)는 Google Fonts 패키지 없이
+  # 시스템 폰트 사용 (Android: Noto Sans KR 기본 탑재)

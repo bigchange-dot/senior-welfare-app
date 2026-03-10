@@ -1,0 +1,7 @@
+.env
+backend/.env.yaml
+__pycache__/
+*.pyc
+.claude/
+todo.md
+backend/=*

@@ -1,0 +1,16 @@
+[Claude Code CLI 전용 복사 프롬프트]
+현재 디렉토리에 있는 architecture.md 파일을 꼼꼼히 읽고 분석해 줘.
+우리는 이 설계도를 바탕으로 '노인 복지 속보 알림 앱'의 백엔드와 프론트엔드를 풀스택으로 구축할 거야.
+
+다음 순서대로 작업을 진행해 줘:
+
+프로젝트 구조 세팅: 터미널 명령어를 실행해서 backend 폴더(Firebase Cloud Functions for Python)와 frontend 폴더(Flutter)를 생성하고 초기화해.
+
+백엔드 (Track A & B): 공공데이터포털 API와 웹 스크래핑을 활용한 데이터 수집, Gemini API를 이용한 AI 요약, 그리고 Firestore 트리거 기반 FCM 알림 발송 파이썬 코드를 작성해.
+
+프론트엔드 (UI/UX): 설계서 5번 항목에 명시된 '어르신 친화적 UI (초대형 폰트, 고대비, 심플한 탭 네비게이션)'를 엄격하게 적용하여 Flutter 메인 화면 UI 코드를 작성하고 Firestore와 연동해.
+
+[중요 작동 지침]
+코드를 바로 작성하거나 폴더를 생성하지 마!
+먼저 터미널에 전체적인 **[구현 계획(Implementation Plan)]**을 상세한 텍스트로 출력하고 내 답변을 기다려.
+내가 "승인"이라고 답변하면, 그때부터 터미널 명령어 실행 권한을 사용해 실제 코딩과 패키지 설치(flutter pub get, pip install 등)를 시작해 줘.

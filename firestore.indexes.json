@@ -1,0 +1,13 @@
+{
+    "indexes": [
+        {
+            "collectionGroup": "welfare_notices",
+            "queryScope": "COLLECTION",
+            "fields": [
+                { "fieldPath": "source", "order": "ASCENDING" },
+                { "fieldPath": "timestamp", "order": "DESCENDING" }
+            ]
+        }
+    ],
+    "fieldOverrides": []
+}
