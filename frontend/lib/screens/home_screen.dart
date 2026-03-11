@@ -31,11 +31,13 @@ class _HomeScreenState extends State<HomeScreen> {
   String get _selectedSource => _filters[_selectedFilterIdx].source;
 
   Set<String> _bookmarkedIds = {};
+  late Future<QuerySnapshot> _noticeFuture;
 
   @override
   void initState() {
     super.initState();
     _loadBookmarks();
+    _noticeFuture = _query.get();
   }
 
   Future<void> _loadBookmarks() async {
@@ -96,13 +98,17 @@ class _HomeScreenState extends State<HomeScreen> {
           _FilterChipBar(
             filters:     _filters,
             selectedIdx: _selectedFilterIdx,
-            onSelected:  (idx) => setState(() => _selectedFilterIdx = idx),
+            onSelected: (idx) => setState(() {
+              _selectedFilterIdx = idx;
+              _noticeFuture = _query.get();
+            }),
           ),
 
           // ── 공고 리스트
           Expanded(
             child: kIsWeb ? _buildMockList() : _buildFirestoreList(),
           ),
+
         ],
       ),
     );
@@ -136,90 +142,107 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // ── Firestore 실시간 리스트 ───────────────────
+  // ── Firestore 1회 조회 리스트 (비용 최적화) ───────────────────
   Widget _buildFirestoreList() {
-    return StreamBuilder<QuerySnapshot>(
-      stream: _query.snapshots(),
-      builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Center(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                CircularProgressIndicator(color: SeniorTheme.primary),
-                SizedBox(height: 20),
-                Text(
-                  '최신 복지 소식을 불러오는 중...',
-                  style: TextStyle(fontSize: SeniorTheme.fontMD, color: SeniorTheme.textSecond),
-                ),
-              ],
-            ),
-          );
-        }
+    return RefreshIndicator(
+      color: SeniorTheme.primary,
+      onRefresh: () async {
+        final newFuture = _query.get();
+        setState(() => _noticeFuture = newFuture);
+        await newFuture;
+      },
+      child: FutureBuilder<QuerySnapshot>(
+        future: _noticeFuture,
+        builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return const Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  CircularProgressIndicator(color: SeniorTheme.primary),
+                  SizedBox(height: 20),
+                  Text(
+                    '최신 복지 소식을 불러오는 중...',
+                    style: TextStyle(fontSize: SeniorTheme.fontMD, color: SeniorTheme.textSecond),
+                  ),
+                ],
+              ),
+            );
+          }
 
-        if (snapshot.hasError) {
-          return const Center(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(Icons.error_outline, size: 64, color: Colors.red),
-                SizedBox(height: 16),
-                Text(
-                  '잠시 후 다시 시도해 주세요.',
-                  style: TextStyle(fontSize: SeniorTheme.fontMD, color: SeniorTheme.textSecond),
-                ),
-              ],
-            ),
-          );
-        }
+          if (snapshot.hasError) {
+            return const Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.error_outline, size: 64, color: Colors.red),
+                  SizedBox(height: 16),
+                  Text(
+                    '잠시 후 다시 시도해 주세요.',
+                    style: TextStyle(fontSize: SeniorTheme.fontMD, color: SeniorTheme.textSecond),
+                  ),
+                ],
+              ),
+            );
+          }
 
-        if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-          return Center(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                const Icon(Icons.inbox_outlined, size: 80, color: SeniorTheme.textSecond),
-                const SizedBox(height: 20),
-                Text(
-                  _selectedSource.isEmpty ? '아직 등록된 공고가 없습니다.' : '$_selectedSource 공고가 없습니다.',
-                  style: const TextStyle(fontSize: SeniorTheme.fontMD, color: SeniorTheme.textSecond),
-                ),
-              ],
-            ),
-          );
-        }
-
-        final notices = snapshot.data!.docs
-            .map((doc) => WelfareNotice.fromFirestore(doc))
-            .toList();
-        final itemCount = notices.length + (notices.length ~/ 5);
-
-        return ListView.builder(
-          padding: const EdgeInsets.only(top: 8, bottom: 80),
-          itemCount: itemCount,
-          itemBuilder: (context, idx) {
-            if ((idx + 1) % 6 == 0) return const AdPlaceholderCard();
-            final noticeIdx = idx - (idx ~/ 6);
-            if (noticeIdx >= notices.length) return const SizedBox.shrink();
-            final notice = notices[noticeIdx];
-            return NoticeCard(
-              notice:       notice,
-              isBookmarked: _bookmarkedIds.contains(notice.id),
-              onBookmark:   () => _toggleBookmark(notice.id),
-              onTap: () => Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (_) => WebViewScreen(
-                    url:   notice.url,
-                    title: notice.aiSummary,
-                    docId: notice.id,
+          if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+            return LayoutBuilder(
+              builder: (context, constraints) => SingleChildScrollView(
+                physics: const AlwaysScrollableScrollPhysics(),
+                child: SizedBox(
+                  height: constraints.maxHeight,
+                  child: Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        const Icon(Icons.inbox_outlined, size: 80, color: SeniorTheme.textSecond),
+                        const SizedBox(height: 20),
+                        Text(
+                          _selectedSource.isEmpty ? '아직 등록된 공고가 없습니다.' : '$_selectedSource 공고가 없습니다.',
+                          style: const TextStyle(fontSize: SeniorTheme.fontMD, color: SeniorTheme.textSecond),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               ),
             );
-          },
-        );
-      },
+          }
+
+          final notices = snapshot.data!.docs
+              .map((doc) => WelfareNotice.fromFirestore(doc))
+              .toList();
+          final itemCount = notices.length + (notices.length ~/ 5);
+
+          return ListView.builder(
+            physics: const AlwaysScrollableScrollPhysics(),
+            padding: const EdgeInsets.only(top: 8, bottom: 80),
+            itemCount: itemCount,
+            itemBuilder: (context, idx) {
+              if ((idx + 1) % 6 == 0) return const AdPlaceholderCard();
+              final noticeIdx = idx - (idx ~/ 6);
+              if (noticeIdx >= notices.length) return const SizedBox.shrink();
+              final notice = notices[noticeIdx];
+              return NoticeCard(
+                notice:       notice,
+                isBookmarked: _bookmarkedIds.contains(notice.id),
+                onBookmark:   () => _toggleBookmark(notice.id),
+                onTap: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => WebViewScreen(
+                      url:   notice.url,
+                      title: notice.aiSummary,
+                      docId: notice.id,
+                    ),
+                  ),
+                ),
+              );
+            },
+          );
+        },
+      ),
     );
   }
 }

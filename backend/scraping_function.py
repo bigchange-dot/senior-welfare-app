@@ -27,7 +27,7 @@ from dotenv import load_dotenv
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), '..', '.env'))
 
 GEMINI_API_KEY      = os.getenv("GEMINI_API_KEY", "")
-DATA_GO_KR_KEY      = os.getenv("DATA_GO_KR_KEY", "")
+DATA_GO_KR_KEY      = os.getenv("DATA_GO_KR_KEY", "").strip()
 FIREBASE_COLLECTION = "welfare_notices"
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -436,11 +436,15 @@ def run_scraping_pipeline(request=None):
             skipped_count += 1
             continue
 
-        ai_summary = summarize_with_gemini(title, content)
-
-        if ai_summary.strip().upper() == "SKIP":
-            logger.info(f"🚫 AI 필터링: {title[:30]}")
-            continue
+        # 복지로는 이미 노인 카테고리(srchKeyCode=003)로 필터됨 → Gemini 스킵
+        if source == "복지로":
+            ai_summary = f"📢 {title[:28]}"
+            logger.info(f"📋 복지로 직접 저장: {ai_summary}")
+        else:
+            ai_summary = summarize_with_gemini(title, content)
+            if ai_summary.strip().upper() == "SKIP":
+                logger.info(f"🚫 AI 필터링: {title[:30]}")
+                continue
 
         save_to_firestore(title, ai_summary, source, url)
         saved_count += 1

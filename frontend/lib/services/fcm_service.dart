@@ -41,7 +41,11 @@ class FcmService {
       );
       debugPrint('🔔 FCM 권한: ${settings.authorizationStatus}');
 
-      // 2. 기본 토픽 구독 (전체 알림)
+      // 2. FCM 토큰 출력 (테스트용 — 실기기 확인 후 제거 가능)
+      final token = await fcm.getToken();
+      debugPrint('📱 FCM 토큰: $token');
+
+      // 3. 기본 토픽 구독 (전체 알림)
       await fcm.subscribeToTopic('all');
       debugPrint('✅ FCM 토픽 구독: all');
 
