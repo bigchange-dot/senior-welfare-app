@@ -43,3 +43,8 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# Firebase 설정 파일 (민감한 키 포함 — 절대 커밋 금지)
+lib/firebase_options.dart
+google-services.json
+GoogleService-Info.plist
