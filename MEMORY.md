@@ -8,7 +8,7 @@
 - **Backend:** Firebase Cloud Functions (Python 3.11) — `backend/` 폴더
 - **Frontend:** Flutter (iOS/Android) — `frontend/` 폴더
 - **DB:** Firestore (`welfare_notices` 컬렉션)
-- **AI:** Gemini API (gemini-2.5-flash)
+- **AI:** Gemini API (gemini-3.1-flash-lite-preview)
 - **Push:** FCM (Topic: all, bokjiro, seongdong, gangbuk)
 - **시크릿:** Firebase Secret Manager (GEMINI_API_KEY, DATA_GO_KR_KEY)
 
@@ -76,7 +76,7 @@
 - Firestore 규칙 배포: `firebase deploy --only firestore:rules`
 
 ## Gemini API Rate Limit 처리 (scraping_function.py)
-- 모델: `gemini-2.5-flash` (안정적, 사용 권장)
+- 모델: `gemini-3.1-flash-lite-preview` (안정적, 사용 권장)
 - 호출 후 `time.sleep(13)` — 무료 티어 분당 5회 제한 준수
 - 429 발생 시 재시도: 1차 65초 대기, 2차 130초 대기 후 재시도 (최대 3회)
 - 강북구청 언론보도 링크: `javascript:viewCount('ID', 'https://...')` → 정규식으로 URL 추출

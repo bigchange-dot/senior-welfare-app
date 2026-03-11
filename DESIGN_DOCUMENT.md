@@ -54,7 +54,7 @@
 |------|------|
 | **Backend** | Firebase Cloud Functions (Python 3.11, 2nd Gen) |
 | **Database** | Cloud Firestore (`welfare_notices` 컬렉션) |
-| **AI 요약** | Google Gemini API (`gemini-2.5-flash`) |
+| **AI 요약** | Google Gemini API (`gemini-3.1-flash-lite-preview`) |
 | **Push 알림** | Firebase Cloud Messaging (FCM) — Topic 방식 |
 | **스케줄러** | Cloud Scheduler (asia-northeast3) |
 | **Frontend** | Flutter 3 (iOS / Android) |
@@ -92,7 +92,7 @@
 **AI 요약 프롬프트 패턴:**
 ```python
 client.models.generate_content(
-    model="gemini-2.5-flash",
+    model="gemini-3.1-flash-lite-preview",
     contents=f"다음 공고 제목을 어르신도 이해하기 쉽게 이모지 포함 20자 이내로 요약: {title}"
 )
 ```
@@ -169,7 +169,7 @@ SOURCE_TOPIC_MAP = {
 │  └─────────────────────┘    │
 │                             │
 ├─────────────────────────────┤
-│  [홈(속보)] [내지역] [설정]  │  ← BottomNavigationBar
+│  [홈] [찜] [설정]            │  ← BottomNavigationBar
 └─────────────────────────────┘
 ```
 
@@ -177,8 +177,8 @@ SOURCE_TOPIC_MAP = {
 
 | 탭 | 주요 기능 |
 |----|----------|
-| **홈 (속보)** | 전체 공고 실시간 스트림, 필터 칩(전체/성동구청/강북구청/복지로), 5건마다 광고 삽입 |
-| **내 지역** | 설정에서 저장한 구청 공고만 필터링 표시, 지역 헤더 배너, 최신 30건 |
+| **홈 (속보)** | 전체 공고 실시간 스트림, 필터 칩(전체/성동구청/강북구청/복지로), 5건마다 광고 삽입, 공고 카드 ♥ 버튼으로 찜 추가 |
+| **찜한 공고** | SharedPreferences에 저장된 공고 ID를 Firestore에서 조회, 최대 30건, 탭 전환 시 자동 새로고침, 찜 해제 가능 |
 | **설정** | 지역 선택(FCM 토픽 자동 변경), 알림 ON/OFF, 앱 정보 |
 
 ### 4.3 공고 상세 (WebViewScreen)
@@ -292,10 +292,10 @@ senior-welfare-app/
 │   │   ├── models/
 │   │   │   └── welfare_notice.dart  # Firestore 데이터 모델
 │   │   ├── screens/
-│   │   │   ├── home_screen.dart     # 홈(속보) 탭 — 필터 칩 + 실시간 스트림
-│   │   │   ├── my_region_screen.dart # 내 지역 탭
-│   │   │   ├── settings_screen.dart  # 설정 탭 — 지역 선택 + 알림 ON/OFF
-│   │   │   └── webview_screen.dart   # 공고 상세 — InApp WebView + AdMob
+│   │   │   ├── home_screen.dart       # 홈(속보) 탭 — 필터 칩 + 실시간 스트림 + 찜 버튼
+│   │   │   ├── bookmarks_screen.dart  # 찜한 공고 탭 — SharedPreferences + Firestore 조회
+│   │   │   ├── settings_screen.dart   # 설정 탭 — 지역 선택 + 알림 ON/OFF
+│   │   │   └── webview_screen.dart    # 공고 상세 — InApp WebView + AdMob
 │   │   ├── widgets/
 │   │   │   └── notice_card.dart     # 공고 카드 + 광고 플레이스홀더
 │   │   └── services/
@@ -310,7 +310,7 @@ senior-welfare-app/
 
 ---
 
-## 7. 배포 현황 (2026-03-09 기준)
+## 7. 배포 현황 (2026-03-11 기준)
 
 | 항목 | 상태 | 비고 |
 |------|------|------|
@@ -321,6 +321,8 @@ senior-welfare-app/
 | Firestore Database | ✅ 생성 완료 | asia-northeast3 |
 | Firestore 보안 규칙 | ✅ 배포 완료 | welfare_notices 읽기 허용 |
 | Firestore 복합 인덱스 | ✅ 배포 완료 | source + timestamp |
+| AdMob 앱·광고단위 등록 | ✅ 완료 | `ca-app-pub-5634467403173492/3253182704` |
+| Firebase 앱 등록 (`com.seniorwelfare.senior_welfare_app`) | ✅ 완료 | google-services.json 적용 |
 | Flutter 앱 (Android 에뮬레이터) | ✅ 정상 작동 확인 | Firestore 연동 확인 |
 | Flutter 앱 (Android 실기기) | 🔲 미확인 | FCM 푸시 테스트 필요 |
 | Flutter 앱 (iOS) | 🔲 미진행 | — |
@@ -329,15 +331,18 @@ senior-welfare-app/
 
 ## 8. 남은 작업
 
+→ 상세 작업 현황은 `TODO.md` 참고
+
 | 항목 | 우선순위 |
 |------|----------|
-| AdMob 콘솔 앱·광고단위 등록 후 실제 ID로 교체 | 높음 |
-| Firebase 콘솔에서 `com.seniorwelfare.senior_welfare_app`으로 앱 재등록 및 google-services.json 교체 | 높음 |
 | 실기기(Android)에서 FCM 푸시 수신 및 딥링크 확인 | 높음 |
+| Firestore `snapshots()` → `get()` 전환 (비용 최적화) | 높음 |
 | 복지로 API 404 오류 수정 (data.go.kr 엔드포인트 변경 확인) | 중간 |
 | iOS 빌드 및 테스트 (GoogleService-Info.plist 등록 필요) | 중간 |
 | 앱 아이콘 · 스플래시 스크린 제작 | 중간 |
-| 앱스토어 / 구글플레이 배포 준비 (서명 키, 스토어 설명, 개인정보처리방침) | 낮음 |
+| 개인정보처리방침 작성 및 호스팅 | 출시 전 필수 |
+| App Check 적용 (플레이스토어 등록 후) | 출시 전 필수 |
+| 앱스토어 / 구글플레이 배포 준비 (서명 키, 스토어 설명) | 낮음 |
 
 ---
 
