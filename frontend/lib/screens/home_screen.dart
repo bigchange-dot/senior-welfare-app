@@ -19,12 +19,17 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
-  // 필터 칩 목록 (figma.md 순서)
+  // 필터 칩 목록
   static const List<_FilterChipData> _filters = [
     _FilterChipData(label: '전체',    source: ''),
+    _FilterChipData(label: '복지로',  source: '복지로'),
+    _FilterChipData(label: '노원구청', source: '노원구청'),
+    _FilterChipData(label: '도봉구청', source: '도봉구청'),
+    _FilterChipData(label: '중랑구청', source: '중랑구청'),
+    _FilterChipData(label: '마포구청', source: '마포구청'),
+    _FilterChipData(label: '은평구청', source: '은평구청'),
     _FilterChipData(label: '성동구청', source: '성동구청'),
     _FilterChipData(label: '강북구청', source: '강북구청'),
-    _FilterChipData(label: '복지로',  source: '복지로'),
   ];
 
   int _selectedFilterIdx = 0;
@@ -269,7 +274,7 @@ class _FilterChipBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      color: SeniorTheme.surface,
+      color: SeniorTheme.background,
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
       child: SingleChildScrollView(
         scrollDirection: Axis.horizontal,
@@ -284,7 +289,7 @@ class _FilterChipBar extends StatelessWidget {
                   duration: const Duration(milliseconds: 150),
                   padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
                   decoration: BoxDecoration(
-                    color: selected ? SeniorTheme.primary : SeniorTheme.background,
+                    color: selected ? SeniorTheme.primary : Colors.transparent,
                     borderRadius: BorderRadius.circular(24),
                     border: Border.all(
                       color: selected ? SeniorTheme.primary : SeniorTheme.divider,

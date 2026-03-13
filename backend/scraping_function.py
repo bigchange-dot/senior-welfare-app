@@ -124,7 +124,7 @@ def summarize_with_gemini(title: str, content: str = "") -> str:
         try:
             client   = _get_gemini()
             response = client.models.generate_content(
-                model="gemini-2.5-flash",
+                model="gemini-3.1-flash-lite-preview",
                 contents=prompt,
             )
             result = response.text.strip()
@@ -361,6 +361,53 @@ def _scrape_gangbuk_board(url: str, label: str, limit: int = 15) -> list[dict]:
 
 
 # ─────────────────────────────────────────────
+# 서울 구청 공통 스크래퍼 (SAB 없는 일반 구청)
+# ─────────────────────────────────────────────
+def _scrape_seoul_board(url: str, label: str, base_domain: str, limit: int = 15) -> list[dict]:
+    """서울 구청 표준 게시판 공통 스크래핑 (봇 감지 없는 일반 사이트용)."""
+    articles = []
+    try:
+        res = requests.get(url, headers=HEADERS, timeout=15)
+        res.raise_for_status()
+        soup = BeautifulSoup(res.text, "lxml")
+
+        # 일반적인 한국 구청 게시판 셀렉터 패턴
+        rows = soup.select(
+            "table.board_list tbody tr, table.bbs_list tbody tr, "
+            "table.list_type tbody tr, table tbody tr"
+        )
+        logger.info(f"{label}: {len(rows)}개 행 발견")
+
+        for row in rows[:limit]:
+            try:
+                link_tag = row.select_one("td.subject a, td.title a, td.tit a, td a")
+                if not link_tag:
+                    continue
+                title = link_tag.get_text(strip=True)
+                href  = link_tag.get("href", "")
+                if not title or href.startswith("javascript:"):
+                    continue
+                if href.startswith("/"):
+                    detail_url = base_domain + href
+                elif href.startswith("http"):
+                    detail_url = href
+                elif href.startswith("?"):
+                    detail_url = url.split("?")[0] + href
+                elif href.startswith("./"):
+                    # 상대경로: ./foo.do → 현재 경로 기준으로 변환
+                    base_path = url.rsplit("/", 1)[0]
+                    detail_url = base_path + "/" + href[2:]
+                else:
+                    continue
+                articles.append({"title": title, "url": detail_url, "content": "", "source": label.split()[-1]})
+            except Exception as e:
+                logger.warning(f"⚠️ {label} 행 파싱 오류: {e}")
+    except Exception as e:
+        logger.error(f"❌ {label} 스크래핑 오류: {e}")
+    return articles
+
+
+# ─────────────────────────────────────────────
 # Track A-4: 강북구청 채용공고
 # ─────────────────────────────────────────────
 def scrape_gangbuk_jobs() -> list[dict]:
@@ -391,6 +438,90 @@ def scrape_gangbuk_media() -> list[dict]:
 
 
 # ─────────────────────────────────────────────
+# Track A-7: 노원구청 채용 공고
+# 도메인: nowon.kr (nowon.go.kr 아님 — SSL 불일치)
+# 링크 형식: javascript:opView('ID') → 상세 URL 직접 생성
+# 확인: 2026-03-12 ✅ 193건 게시판 정상
+# ─────────────────────────────────────────────
+def scrape_nowon() -> list[dict]:
+    url      = "https://www.nowon.kr/www/user/bbs/BD_selectBbsList.do?q_bbsCode=1003&q_estnColumn7=Y"
+    articles = []
+    try:
+        res = requests.get(url, headers=HEADERS, timeout=15)
+        res.raise_for_status()
+        soup = BeautifulSoup(res.text, "lxml")
+        rows = soup.select("table tbody tr")
+        logger.info(f"🏢 노원구청: {len(rows)}개 행 발견")
+        for row in rows[:15]:
+            try:
+                link_tag = row.select_one("td a")
+                if not link_tag:
+                    continue
+                title = link_tag.get_text(strip=True)
+                href  = link_tag.get("href", "")
+                # javascript:opView('ID') 패턴에서 ID 추출
+                m = re.search(r"opView\('([^']+)'", href)
+                if not m:
+                    continue
+                post_id    = m.group(1)
+                detail_url = f"https://www.nowon.kr/www/user/bbs/BD_selectBbsDetail.do?q_bbsCode=1003&q_bbscttSn={post_id}"
+                if title:
+                    articles.append({"title": title, "url": detail_url, "content": "", "source": "노원구청"})
+            except Exception as e:
+                logger.warning(f"⚠️ 노원구청 행 파싱 오류: {e}")
+    except Exception as e:
+        logger.error(f"❌ 노원구청 스크래핑 오류: {e}")
+    return articles
+
+
+# ─────────────────────────────────────────────
+# Track A-8: 도봉구청 공지사항 (채용공고 동적 로딩 불가 → 공지사항으로 대체)
+# 링크 형식: ./bbs.asp?bmode=D&... (상대경로, 직접 URL)
+# 확인: 2026-03-12 ✅ 게시글 정상 확인
+# ─────────────────────────────────────────────
+def scrape_dobong() -> list[dict]:
+    return _scrape_seoul_board(
+        "https://www.dobong.go.kr/bbs.asp?code=10008769",
+        "🏢 도봉구청", "https://www.dobong.go.kr", limit=15
+    )
+
+
+# ─────────────────────────────────────────────
+# Track A-9: 중랑구청 채용 공고
+# 확인: 2026-03-12 ⚠️ WebFetch 파싱 오류 — Python requests는 정상 작동 가능
+# ─────────────────────────────────────────────
+def scrape_jungnang() -> list[dict]:
+    return _scrape_seoul_board(
+        "https://www.jungnang.go.kr/portal/bbs/list/B0000118.do?menuNo=200476",
+        "🏢 중랑구청", "https://www.jungnang.go.kr", limit=15
+    )
+
+
+# ─────────────────────────────────────────────
+# Track A-10: 마포구청 채용 공고
+# 확인: 2026-03-12 ✅ 게시판 정상 (채용공고 다수 확인)
+# ─────────────────────────────────────────────
+def scrape_mapo() -> list[dict]:
+    return _scrape_seoul_board(
+        "https://www.mapo.go.kr/site/main/nPortalr/lists",
+        "🏢 마포구청", "https://www.mapo.go.kr", limit=15
+    )
+
+
+# ─────────────────────────────────────────────
+# Track A-11: 은평구청 구인·구직 공고
+# 도메인: ep.go.kr (http:// — https:// 타임아웃 발생)
+# 링크 형식: ./selectBbsNttView.do?... (상대경로, 직접 URL)
+# 확인: 2026-03-12 ✅ 게시판 정상 (채용공고 다수 확인)
+# ─────────────────────────────────────────────
+def scrape_eunpyeong() -> list[dict]:
+    return _scrape_seoul_board(
+        "http://www.ep.go.kr/www/selectBbsNttList.do?key=750&bbsNo=46",
+        "🏢 은평구청", "http://www.ep.go.kr", limit=15
+    )
+
+
+# ─────────────────────────────────────────────
 # 메인 파이프라인
 # ─────────────────────────────────────────────
 def run_scraping_pipeline(request=None):
@@ -403,10 +534,15 @@ def run_scraping_pipeline(request=None):
         scrape_gangbuk_jobs,
         scrape_gangbuk_press,
         scrape_gangbuk_media,
+        scrape_nowon,
+        scrape_dobong,
+        scrape_jungnang,
+        scrape_mapo,
+        scrape_eunpyeong,
     ]
 
     all_articles: list[dict] = []
-    with concurrent.futures.ThreadPoolExecutor(max_workers=6) as executor:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=11) as executor:
         futures = {executor.submit(fn): fn.__name__ for fn in scrapers}
         for future in concurrent.futures.as_completed(futures):
             fn_name = futures[future]

@@ -16,7 +16,7 @@ if (keyPropertiesFile.exists()) {
 android {
     namespace = "com.seniorwelfare.senior_welfare_app"
     compileSdk = flutter.compileSdkVersion
-    ndkVersion = flutter.ndkVersion
+    ndkVersion = "28.2.13676358"
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
@@ -50,6 +50,10 @@ android {
     buildTypes {
         release {
             signingConfig = signingConfigs.getByName("release")
+            // 심볼 테이블 파일 생성 (Flutter AAB 빌드 검증 통과용)
+            ndk {
+                debugSymbolLevel = "SYMBOL_TABLE"
+            }
         }
     }
 }

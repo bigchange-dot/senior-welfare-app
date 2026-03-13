@@ -17,13 +17,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
   static const List<Map<String, String>> _regions = [
     {'label': '전체',               'source': '',         'topic': ''},
     {'label': '복지로 (중앙정부)',   'source': '복지로',   'topic': 'bokjiro'},
+    {'label': '노원구청',           'source': '노원구청', 'topic': 'nowon'},
+    {'label': '도봉구청',           'source': '도봉구청', 'topic': 'dobong'},
+    {'label': '중랑구청',           'source': '중랑구청', 'topic': 'jungnang'},
+    {'label': '마포구청',           'source': '마포구청', 'topic': 'mapo'},
+    {'label': '은평구청',           'source': '은평구청', 'topic': 'eunpyeong'},
     {'label': '성동구청',           'source': '성동구청', 'topic': 'seongdong'},
     {'label': '강북구청',           'source': '강북구청', 'topic': 'gangbuk'},
   ];
 
-  String _selectedSource = '';
-  String _selectedTopic  = '';
-  bool   _notifEnabled   = true;
+  List<String> _selectedSources = [];
+  List<String> _selectedTopics  = [];
+  bool         _notifEnabled    = true;
+
+  static const int _maxRegions = 3;
 
   @override
   void initState() {
@@ -34,38 +41,76 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Future<void> _loadPrefs() async {
     final prefs = await SharedPreferences.getInstance();
     setState(() {
-      _selectedSource = prefs.getString('selected_source') ?? '';
-      _selectedTopic  = prefs.getString('selected_topic')  ?? '';
-      _notifEnabled   = prefs.getBool('notif_enabled')     ?? true;
+      _selectedSources = prefs.getStringList('selected_sources') ?? [];
+      _selectedTopics  = prefs.getStringList('selected_topics')  ?? [];
+      _notifEnabled    = prefs.getBool('notif_enabled')          ?? true;
     });
   }
 
-  Future<void> _saveRegion(Map<String, String> region) async {
-    final prefs = await SharedPreferences.getInstance();
-    final newSource = region['source'] ?? '';
-    final newTopic  = region['topic']  ?? '';
+  Future<void> _toggleRegion(Map<String, String> region) async {
+    final source = region['source'] ?? '';
+    final topic  = region['topic']  ?? '';
 
-    // FCM 토픽 변경
-    await FcmService.instance.updateRegionTopic(
-      oldTopic: _selectedTopic.isNotEmpty ? _selectedTopic : null,
-      newTopic: newTopic.isNotEmpty       ? newTopic        : null,
-    );
+    final isSelected = _selectedSources.contains(source);
 
-    await prefs.setString('selected_source', newSource);
-    await prefs.setString('selected_topic',  newTopic);
+    // 최대 3개 초과 시 안내
+    if (!isSelected && _selectedSources.length >= _maxRegions) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              '최대 3개까지 선택할 수 있어요.',
+              style: TextStyle(fontSize: SeniorTheme.fontSM),
+            ),
+            backgroundColor: Colors.orange,
+            duration: Duration(seconds: 2),
+          ),
+        );
+      }
+      return;
+    }
+
+    // 즉시 UI 업데이트
+    final newSources = List<String>.from(_selectedSources);
+    final newTopics  = List<String>.from(_selectedTopics);
+
+    if (isSelected) {
+      newSources.remove(source);
+      newTopics.remove(topic);
+    } else {
+      newSources.add(source);
+      if (topic.isNotEmpty) newTopics.add(topic);
+    }
 
     setState(() {
-      _selectedSource = newSource;
-      _selectedTopic  = newTopic;
+      _selectedSources = newSources;
+      _selectedTopics  = newTopics;
     });
 
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setStringList('selected_sources', newSources);
+    await prefs.setStringList('selected_topics',  newTopics);
+
+    // FCM 토픽 변경
+    if (isSelected) {
+      await FcmService.instance.updateRegionTopic(
+        oldTopic: topic.isNotEmpty ? topic : null,
+        newTopic: null,
+      );
+    } else {
+      await FcmService.instance.updateRegionTopic(
+        oldTopic: null,
+        newTopic: topic.isNotEmpty ? topic : null,
+      );
+    }
+
     if (mounted) {
+      final msg = isSelected
+          ? '${region['label']} 선택 해제'
+          : '${region['label']} 선택됨 (${newSources.length}/$_maxRegions)';
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(
-            newSource.isEmpty ? '전체 지역으로 설정했습니다.' : '$newSource 공고만 받습니다.',
-            style: const TextStyle(fontSize: SeniorTheme.fontSM),
-          ),
+          content: Text(msg, style: const TextStyle(fontSize: SeniorTheme.fontSM)),
           backgroundColor: SeniorTheme.primary,
           duration: const Duration(seconds: 2),
         ),
@@ -79,8 +124,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
     if (value) {
       await FcmService.instance.updateRegionTopic(newTopic: 'all');
-      if (_selectedTopic.isNotEmpty) {
-        await FcmService.instance.updateRegionTopic(newTopic: _selectedTopic);
+      for (final topic in _selectedTopics) {
+        if (topic.isNotEmpty) {
+          await FcmService.instance.updateRegionTopic(newTopic: topic);
+        }
       }
     } else {
       await FcmService.instance.unsubscribeAll();
@@ -106,22 +153,43 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
           ),
           const SizedBox(height: 8),
-          const Text(
-            '선택한 지역의 복지 공고만 모아볼 수 있어요.',
-            style: TextStyle(
-              fontSize: SeniorTheme.fontMD,
-              color:    SeniorTheme.textSecond,
-            ),
+          Row(
+            children: [
+              const Expanded(
+                child: Text(
+                  '선택한 지역의 복지 공고를 찜 탭에서 모아볼 수 있어요.',
+                  style: TextStyle(
+                    fontSize: SeniorTheme.fontMD,
+                    color:    SeniorTheme.textSecond,
+                  ),
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                decoration: BoxDecoration(
+                  color:        SeniorTheme.primary.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Text(
+                  '${_selectedSources.length}/$_maxRegions 선택',
+                  style: const TextStyle(
+                    fontSize:   SeniorTheme.fontSM,
+                    fontWeight: FontWeight.bold,
+                    color:      SeniorTheme.primary,
+                  ),
+                ),
+              ),
+            ],
           ),
           const SizedBox(height: 20),
 
           // 지역 선택 버튼 목록
           ..._regions.map((region) {
-            final isSelected = _selectedSource == region['source'];
+            final isSelected = _selectedSources.contains(region['source']);
             return _RegionOptionTile(
               label:      region['label']!,
               isSelected: isSelected,
-              onTap:      () => _saveRegion(region),
+              onTap:      () => _toggleRegion(region),
             );
           }),
 
@@ -158,8 +226,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
           ),
           const SizedBox(height: 12),
-          _InfoRow(label: '버전',   value: '1.0.0'),
-          _InfoRow(label: '데이터', value: '복지로 · 성동구청 · 강북구청'),
+          _InfoRow(label: '버전',   value: '1.1.0'),
+          _InfoRow(label: '데이터', value: '복지로 · 노원 · 도봉 · 중랑 · 마포 · 은평 · 성동 · 강북'),
           _InfoRow(label: 'AI 요약', value: 'Google Gemini 2.5 Flash'),
         ],
       ),
@@ -182,8 +250,9 @@ class _RegionOptionTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
+    return InkWell(
       onTap: onTap,
+      borderRadius: BorderRadius.circular(SeniorTheme.cardRadius),
       child: Container(
         margin: const EdgeInsets.only(bottom: 12),
         padding: const EdgeInsets.symmetric(
@@ -201,7 +270,7 @@ class _RegionOptionTile extends StatelessWidget {
         child: Row(
           children: [
             Icon(
-              isSelected ? Icons.radio_button_checked : Icons.radio_button_off,
+              isSelected ? Icons.check_box : Icons.check_box_outline_blank,
               color: isSelected ? Colors.white : SeniorTheme.textSecond,
               size:  28,
             ),

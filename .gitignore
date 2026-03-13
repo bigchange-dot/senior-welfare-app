@@ -3,7 +3,6 @@ backend/.env.yaml
 __pycache__/
 *.pyc
 .claude/
-todo.md
 backend/=*
 backend/*adminsdk*.json
 backend/*service-account*.json

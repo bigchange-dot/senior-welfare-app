@@ -35,6 +35,11 @@ SOURCE_TOPIC_MAP = {
     "성동구청":           "seongdong",
     "성동구 어르신일자리": "seongdong",
     "강북구청":           "gangbuk",
+    "노원구청":           "nowon",
+    "도봉구청":           "dobong",
+    "중랑구청":           "jungnang",
+    "마포구청":           "mapo",
+    "은평구청":           "eunpyeong",
 }
 
 

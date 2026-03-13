@@ -94,7 +94,7 @@ class _MainScaffoldState extends State<MainScaffold> {
 
   final _bookmarksKey = GlobalKey<BookmarksScreenState>();
 
-  static const List<String> _titles = ['홈 (속보)', '찜한 공고', '설정'];
+  static const List<String> _titles = ['어르신 알리미', '찜한 공고', '설정'];
 
   @override
   Widget build(BuildContext context) {
