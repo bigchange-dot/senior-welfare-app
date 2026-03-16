@@ -59,8 +59,9 @@ class _WebViewScreenState extends State<WebViewScreen> {
       ..loadRequest(Uri.parse(widget.url));
   }
 
-  /// Interstitial 광고 미리 로드
+  /// Interstitial 광고 미리 로드 (출시 후 활성화 예정)
   void _loadInterstitialAd() {
+    return; // TODO: 출시 후 제거
     InterstitialAd.load(
       adUnitId: _adUnitId,
       request: const AdRequest(),
