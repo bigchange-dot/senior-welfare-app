@@ -104,21 +104,62 @@ def save_to_firestore(title: str, ai_summary: str, source: str, url: str) -> str
 # ─────────────────────────────────────────────
 # Gemini AI 요약 (google-genai SDK)
 # ─────────────────────────────────────────────
+def fetch_detail_content(url: str, source: str) -> str:
+    """상세 페이지에서 본문 텍스트 최대 300자 추출."""
+    try:
+        if "gangbuk" in url:
+            session = _get_gangbuk_session(url)
+            res = session.get(url, timeout=10)
+        else:
+            res = requests.get(url, headers=HEADERS, timeout=10)
+        res.raise_for_status()
+        soup = BeautifulSoup(res.text, "lxml")
+
+        # 공통 본문 셀렉터 (한국 공공기관 게시판 패턴)
+        for selector in [
+            "div.view_content", "div.bbs_content", "div.board_view",
+            "div.cont_area", "div.view_txt", "td.view_con",
+            "div.detail_content", "div#content",
+        ]:
+            el = soup.select_one(selector)
+            if el:
+                text = el.get_text(separator=" ", strip=True)
+                if len(text) > 50:
+                    return text[:300]
+
+        # 셀렉터 실패 시 <p> 태그 합산
+        paragraphs = " ".join(p.get_text(strip=True) for p in soup.select("p") if p.get_text(strip=True))
+        return paragraphs[:300]
+    except Exception as e:
+        logger.warning(f"⚠️ 본문 fetch 실패 ({url[:40]}): {e}")
+        return ""
+
+
 def summarize_with_gemini(title: str, content: str = "") -> str:
     """
     노인 관련 공고인지 판별하고, 맞으면 30자 이내 속보 요약 반환.
     관련 없으면 'SKIP' 반환.
     """
-    prompt = f"""당신은 노인 복지 전문 에디터입니다. 다음 공고를 분석해주세요.
+    prompt = f"""당신은 노인 복지 공고 필터링 전문가입니다. 아래 공고를 분석하세요.
 
 제목: {title}
-내용: {content[:500] if content else '(내용 없음)'}
+본문: {content[:300] if content else '(없음)'}
 
-규칙:
-1. 이 공고가 노인(60세 이상) 혜택, 일자리, 지원금, 모집, 신청과 관련이 있으면
-   → 이모지를 포함한 30자 이내 속보 제목만 출력하세요. (예: 📢 성동구 시니어 일자리 100명 모집!)
-2. 관련 없는 공고라면 → 정확히 'SKIP' 만 출력하세요.
-3. 다른 설명이나 부가 문장은 절대 추가하지 마세요."""
+【판별 기준】
+통과(PASS): 노인·어르신(60세 이상) 본인이 직접 혜택받는 공고
+  - 노인 대상 지원금, 수당, 서비스 신청
+  - 노인 일자리·취업 프로그램 참여자 모집
+  - 노인 의료·요양·돌봄 서비스
+
+스킵(SKIP): 아래 중 하나라도 해당하면 반드시 SKIP
+  - 노인 관련 업무 직원·강사·지도사·요양사·봉사자 채용 (예: "시니어 지도사 모집", "요양보호사 채용")
+  - 노인과 무관한 일반 구정 소식, 시설 공사, 행정 공고
+  - 제목과 본문에 노인·어르신·시니어·고령·경로 관련 내용이 전혀 없는 경우
+
+【출력 규칙】
+- PASS이면: 이모지 포함 30자 이내 속보 제목 출력 (제목·본문에 있는 사실만 사용, 없는 단어 추가 금지)
+- SKIP이면: 정확히 'SKIP' 만 출력
+- 설명, 이유, 부가 문장 절대 추가 금지"""
 
     for attempt in range(3):
         try:
@@ -577,6 +618,9 @@ def run_scraping_pipeline(request=None):
             ai_summary = f"📢 {title[:28]}"
             logger.info(f"📋 복지로 직접 저장: {ai_summary}")
         else:
+            # 본문이 없으면 상세 페이지에서 가져옴
+            if not content:
+                content = fetch_detail_content(url, source)
             ai_summary = summarize_with_gemini(title, content)
             if ai_summary.strip().upper() == "SKIP":
                 logger.info(f"🚫 AI 필터링: {title[:30]}")

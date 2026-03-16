@@ -119,6 +119,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Future<void> _toggleNotif(bool value) async {
+    // 즉시 UI 업데이트 (낙관적)
+    setState(() => _notifEnabled = value);
+
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool('notif_enabled', value);
 
@@ -132,8 +135,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
     } else {
       await FcmService.instance.unsubscribeAll();
     }
-
-    setState(() => _notifEnabled = value);
   }
 
   @override
@@ -226,9 +227,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
           ),
           const SizedBox(height: 12),
-          _InfoRow(label: '버전',   value: '1.1.0'),
-          _InfoRow(label: '데이터', value: '복지로 · 노원 · 도봉 · 중랑 · 마포 · 은평 · 성동 · 강북'),
-          _InfoRow(label: 'AI 요약', value: 'Google Gemini 2.5 Flash'),
+          _InfoRow(label: '버전',    value: '1.1.0'),
+          _InfoRow(label: 'AI 요약', value: 'Gemini'),
         ],
       ),
     );

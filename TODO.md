@@ -1,11 +1,21 @@
 # Senior Welfare App — 작업 현황
 
-> 마지막 업데이트: 2026-03-13
+> 마지막 업데이트: 2026-03-13 (v1.1.2)
 > 앱 버전: 1.1.0+2
 
 ---
 
 ## ✅ 완료된 작업
+
+### v1.1.2 — 2026-03-13
+- [x] 알림 토글 즉시 반응 버그 수정 (`_toggleNotif` 낙관적 업데이트 적용)
+- [x] 앱 정보 섹션 간소화 (데이터 항목 제거, AI 요약 → 'Gemini'만 표시)
+- [x] 개인정보처리방침 작성 및 GitHub Pages 호스팅
+  - URL: https://bigchange-dot.github.io/senior-welfare-app/privacy-policy.html
+- [x] 저장소 public 전환 전 보안 검사
+  - `google-services.json` 전체 git 이력에서 제거 (filter-branch)
+  - 저장소 public 전환 완료
+  - GitHub Pages 활성화 완료
 
 ### v1.1.1 — 2026-03-13
 - [x] 설정탭 지역 선택 단일 → 복수 선택 (최대 3개) 변경
@@ -91,7 +101,7 @@
   - 해결 과정: cmdline-tools 설치 → 라이선스 수락 → `debugSymbolLevel = "SYMBOL_TABLE"` 설정
   - 원인: `debugSymbolLevel = "NONE"` 설정 시 `.so.sym` 파일 미생성 → Flutter 검증 실패
   - 추가 설정: `kotlin.incremental=false` (D드라이브 프로젝트 + C드라이브 Pub캐시 경로 충돌 방지)
-- [ ] 개인정보처리방침 작성 및 호스팅 (FCM 토큰 수집으로 필수)
+- [x] 개인정보처리방침 작성 및 호스팅 (https://bigchange-dot.github.io/senior-welfare-app/privacy-policy.html, 2026-03-13)
 - [x] 앱 아이콘 1024×1024 준비 (`senior-welfare-app-icon.png`, 2026-03-13)
 - [ ] 스토어 등록 정보 작성 (설명, 스크린샷 등)
 - [ ] Google Play 개발자 계정 등록 ($25 1회)
