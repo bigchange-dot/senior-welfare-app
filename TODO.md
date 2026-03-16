@@ -7,17 +7,21 @@
 
 ## ✅ 완료된 작업
 
-### v1.1.3 — 2026-03-16
+### v1.1.3 — 2026-03-17
 - [x] Gemini 할루시네이션 방지 및 구청 공고 본문 fetch 추가
   - `fetch_detail_content()` 추가 — 구청 상세 페이지 본문 300자 추출 후 Gemini 전달
   - Gemini 프롬프트 개선 — 직원·강사·지도사 채용 SKIP 명시, 없는 단어 추가 금지
   - 파이프라인: 구청 공고 content 없으면 자동 fetch
+  - 결과: 저장 건수 92건 → 23건 (불필요 공고 대폭 감소)
 - [x] `scraping_function` Cloud Functions 재배포 (00007 revision)
+- [x] Firestore 전체 초기화 후 재스크래핑 (23건 저장)
+- [x] 테스트 기간 광고 비활성화 (`webview_screen.dart` — 출시 전 재활성화 필요)
 - [x] 스토어 자산 준비
   - 스크린샷 4장 캡처 (홈/찜/내지역공고/설정)
   - 앱 아이콘 512×512 (`store-assets/icon_512.png`)
   - 피처드 이미지 1024×500 (`store-assets/featured_1024x500.png`)
-- [x] Google Play 개발자 계정 등록 ($25 결제 완료, 본인확인 대기 중)
+- [x] Google Play 개발자 계정 등록 ($25 결제 완료, 본인확인 대기 중, 2026-03-17)
+- [x] 테스트용 APK 빌드 (47.2MB, 광고 비활성화)
 
 ### v1.1.2 — 2026-03-13
 - [x] 알림 토글 즉시 반응 버그 수정 (`_toggleNotif` 낙관적 업데이트 적용)
