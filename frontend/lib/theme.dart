@@ -44,7 +44,7 @@ class SeniorTheme {
   // ── ThemeData ─────────────────────────
   static ThemeData get themeData => ThemeData(
     useMaterial3: true,
-    fontFamily: fontFamily, // Roboto (Android 기본, iOS 폴백)
+    // fontFamily 미지정 → 시스템 기본 폰트 사용 (이모지 fallback 정상 동작)
     colorScheme: const ColorScheme.light(
       primary:    primary,
       onPrimary:  onPrimary,
@@ -144,9 +144,32 @@ class SeniorTheme {
   );
 
   /// 출처별 배지 색상 반환
+  /// 복지관은 소속 구청과 같은 색상으로 매핑 (수락/마포/도봉/은평/종로/약수/용산/서대문)
   static Color sourceColor(String source) {
+    // 복지로 (중앙정부)
+    if (source.contains('복지로')) return badgeBokjiro;
+    // 노원구 (수락노인복지관 포함)
+    if (source.contains('노원') || source.contains('수락')) return const Color(0xFF00695C);
+    // 도봉구
+    if (source.contains('도봉')) return const Color(0xFF5D4037);
+    // 중랑구
+    if (source.contains('중랑')) return const Color(0xFF6A1B9A);
+    // 마포구
+    if (source.contains('마포')) return const Color(0xFFC62828);
+    // 은평구
+    if (source.contains('은평')) return const Color(0xFF1565C0);
+    // 성동구
     if (source.contains('성동')) return badgeSeongdong;
+    // 강북구
     if (source.contains('강북')) return badgeGangbuk;
-    return badgeBokjiro; // 복지로 기본
+    // 종로구
+    if (source.contains('종로')) return const Color(0xFFAD1457);
+    // 중구 (약수노인복지관 포함)
+    if (source.contains('중구') || source.contains('약수')) return const Color(0xFFEF6C00);
+    // 용산구
+    if (source.contains('용산')) return const Color(0xFF283593);
+    // 서대문구
+    if (source.contains('서대문')) return const Color(0xFF00838F);
+    return badgeBokjiro; // 기본값
   }
 }
