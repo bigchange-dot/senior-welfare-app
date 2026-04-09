@@ -19,21 +19,25 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
-  // 필터 칩 목록
+  // 필터 칩 목록 — sources 복수 지정 시 whereIn 쿼리로 구청+복지관 통합 표시
   static const List<_FilterChipData> _filters = [
-    _FilterChipData(label: '전체',    source: ''),
-    _FilterChipData(label: '복지로',  source: '복지로'),
-    _FilterChipData(label: '노원구청', source: '노원구청'),
-    _FilterChipData(label: '도봉구청', source: '도봉구청'),
-    _FilterChipData(label: '중랑구청', source: '중랑구청'),
-    _FilterChipData(label: '마포구청', source: '마포구청'),
-    _FilterChipData(label: '은평구청', source: '은평구청'),
-    _FilterChipData(label: '성동구청', source: '성동구청'),
-    _FilterChipData(label: '강북구청', source: '강북구청'),
+    _FilterChipData(label: '전체',    sources: []),
+    _FilterChipData(label: '복지로',  sources: ['복지로']),
+    _FilterChipData(label: '노원구청', sources: ['노원구청', '수락노인복지관']),
+    _FilterChipData(label: '도봉구청', sources: ['도봉구청', '도봉노인복지관']),
+    _FilterChipData(label: '중랑구청', sources: ['중랑구청']),
+    _FilterChipData(label: '마포구청', sources: ['마포구청', '마포노인복지관']),
+    _FilterChipData(label: '은평구청', sources: ['은평구청', '은평노인복지관']),
+    _FilterChipData(label: '성동구청', sources: ['성동구청', '성동구 어르신일자리']),
+    _FilterChipData(label: '강북구청', sources: ['강북구청']),
+    _FilterChipData(label: '종로구청', sources: ['종로구청', '종로노인복지관']),
+    _FilterChipData(label: '중구청',   sources: ['중구청', '약수노인복지관']),
+    _FilterChipData(label: '용산구청', sources: ['용산구청', '용산노인복지관']),
+    _FilterChipData(label: '서대문구청', sources: ['서대문구청', '서대문노인복지관']),
   ];
 
   int _selectedFilterIdx = 0;
-  String get _selectedSource => _filters[_selectedFilterIdx].source;
+  List<String> get _selectedSources => _filters[_selectedFilterIdx].sources;
 
   Set<String> _bookmarkedIds = {};
   late Future<QuerySnapshot> _noticeFuture;
@@ -74,18 +78,22 @@ class _HomeScreenState extends State<HomeScreen> {
     WelfareNotice(id: 'm5', title: '강북구 어르신 무료 치과 진료 지원',               aiSummary: '🦷 어르신 무료 치과 진료 신청!',     source: '강북구청', url: 'https://www.bokjiro.go.kr', timestamp: DateTime.now().subtract(const Duration(hours: 16)), isNotified: true),
   ];
 
-  List<WelfareNotice> get _filteredMock => _selectedSource.isEmpty
+  List<WelfareNotice> get _filteredMock => _selectedSources.isEmpty
       ? _mockNotices
-      : _mockNotices.where((n) => n.source == _selectedSource).toList();
+      : _mockNotices.where((n) => _selectedSources.contains(n.source)).toList();
 
   // ── Firestore 쿼리 ────────────────────────────
   Query<Map<String, dynamic>> get _query {
-    if (_selectedSource.isNotEmpty) {
-      return FirebaseFirestore.instance
-          .collection('welfare_notices')
-          .where('source', isEqualTo: _selectedSource)
-          .orderBy('timestamp', descending: true)
-          .limit(20);
+    if (_selectedSources.isNotEmpty) {
+      // 단일 source는 isEqualTo, 복수(구청+복지관)는 whereIn 사용
+      final query = _selectedSources.length == 1
+          ? FirebaseFirestore.instance
+              .collection('welfare_notices')
+              .where('source', isEqualTo: _selectedSources[0])
+          : FirebaseFirestore.instance
+              .collection('welfare_notices')
+              .where('source', whereIn: _selectedSources);
+      return query.orderBy('timestamp', descending: true).limit(20);
     }
     return FirebaseFirestore.instance
         .collection('welfare_notices')
@@ -125,7 +133,7 @@ class _HomeScreenState extends State<HomeScreen> {
     if (notices.isEmpty) {
       return Center(
         child: Text(
-          '$_selectedSource 공고가 없습니다.',
+          '${_filters[_selectedFilterIdx].label} 공고가 없습니다.',
           style: const TextStyle(fontSize: SeniorTheme.fontMD, color: SeniorTheme.textSecond),
         ),
       );
@@ -204,7 +212,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         const Icon(Icons.inbox_outlined, size: 80, color: SeniorTheme.textSecond),
                         const SizedBox(height: 20),
                         Text(
-                          _selectedSource.isEmpty ? '아직 등록된 공고가 없습니다.' : '$_selectedSource 공고가 없습니다.',
+                          _selectedSources.isEmpty ? '아직 등록된 공고가 없습니다.' : '${_filters[_selectedFilterIdx].label} 공고가 없습니다.',
                           style: const TextStyle(fontSize: SeniorTheme.fontMD, color: SeniorTheme.textSecond),
                         ),
                       ],
@@ -255,8 +263,8 @@ class _HomeScreenState extends State<HomeScreen> {
 // ── 필터 칩 데이터 모델 ──────────────────────────
 class _FilterChipData {
   final String label;
-  final String source;
-  const _FilterChipData({required this.label, required this.source});
+  final List<String> sources;
+  const _FilterChipData({required this.label, required this.sources});
 }
 
 // ── 필터 칩 바 위젯 ─────────────────────────────

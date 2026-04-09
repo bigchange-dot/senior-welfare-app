@@ -24,6 +24,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
     {'label': '은평구청',           'source': '은평구청', 'topic': 'eunpyeong'},
     {'label': '성동구청',           'source': '성동구청', 'topic': 'seongdong'},
     {'label': '강북구청',           'source': '강북구청', 'topic': 'gangbuk'},
+    {'label': '종로구청',           'source': '종로구청', 'topic': 'jongno'},
+    {'label': '중구청',             'source': '중구청',   'topic': 'junggu'},
+    {'label': '용산구청',           'source': '용산구청', 'topic': 'yongsan'},
+    {'label': '서대문구청',         'source': '서대문구청','topic': 'seodaemun'},
   ];
 
   List<String> _selectedSources = [];

@@ -135,26 +135,51 @@ def fetch_detail_content(url: str, source: str) -> str:
         return ""
 
 
-def summarize_with_gemini(title: str, content: str = "") -> str:
+WELFARE_CENTER_SOURCES = {
+    "수락노인복지관", "마포노인복지관", "도봉노인복지관", "은평노인복지관",
+    "종로노인복지관", "약수노인복지관", "용산노인복지관", "서대문노인복지관",
+    "성동구 어르신일자리",
+}
+
+
+def summarize_with_gemini(title: str, content: str = "", source: str = "") -> str:
     """
     노인 관련 공고인지 판별하고, 맞으면 30자 이내 속보 요약 반환.
     관련 없으면 'SKIP' 반환.
+    복지관 출처는 어르신 대상 맥락을 명시해 SKIP 비율 완화.
     """
+    # 노인복지관 출처일 때 판별 기준 완화 — 이미 어르신 대상 기관
+    if source in WELFARE_CENTER_SOURCES:
+        context = f"출처: {source} (노인복지관 — 모든 프로그램·서비스가 어르신 대상)\n"
+        pass_criteria = """통과(PASS): 아래 중 하나라도 해당하면 통과
+  - 어르신 참여 프로그램 모집 (교육, 문화, 여가, 취미, 운동 등)
+  - 어르신 일자리·취업 프로그램
+  - 어르신 복지서비스·지원금·수당 신청
+  - 어르신 건강·의료·돌봄 서비스"""
+        skip_criteria = """스킵(SKIP): 아래에 해당하면 SKIP
+  - 직원·강사·요양보호사 등 종사자 채용 공고
+  - 업무추진비·계약 등 행정·회계 공개 공고
+  - 시설 공사·점검 안내"""
+    else:
+        context = ""
+        pass_criteria = """통과(PASS): 노인·어르신(60세 이상) 본인이 직접 혜택받는 공고
+  - 노인 대상 지원금, 수당, 서비스 신청
+  - 노인 일자리·취업 프로그램 참여자 모집
+  - 노인 의료·요양·돌봄 서비스"""
+        skip_criteria = """스킵(SKIP): 아래 중 하나라도 해당하면 반드시 SKIP
+  - 노인 관련 업무 직원·강사·지도사·요양사·봉사자 채용 (예: "시니어 지도사 모집", "요양보호사 채용")
+  - 노인과 무관한 일반 구정 소식, 시설 공사, 행정 공고
+  - 제목과 본문에 노인·어르신·시니어·고령·경로 관련 내용이 전혀 없는 경우"""
+
     prompt = f"""당신은 노인 복지 공고 필터링 전문가입니다. 아래 공고를 분석하세요.
 
-제목: {title}
+{context}제목: {title}
 본문: {content[:300] if content else '(없음)'}
 
 【판별 기준】
-통과(PASS): 노인·어르신(60세 이상) 본인이 직접 혜택받는 공고
-  - 노인 대상 지원금, 수당, 서비스 신청
-  - 노인 일자리·취업 프로그램 참여자 모집
-  - 노인 의료·요양·돌봄 서비스
+{pass_criteria}
 
-스킵(SKIP): 아래 중 하나라도 해당하면 반드시 SKIP
-  - 노인 관련 업무 직원·강사·지도사·요양사·봉사자 채용 (예: "시니어 지도사 모집", "요양보호사 채용")
-  - 노인과 무관한 일반 구정 소식, 시설 공사, 행정 공고
-  - 제목과 본문에 노인·어르신·시니어·고령·경로 관련 내용이 전혀 없는 경우
+{skip_criteria}
 
 【출력 규칙】
 - PASS이면: 이모지 포함 30자 이내 속보 제목 출력 (제목·본문에 있는 사실만 사용, 없는 단어 추가 금지)
@@ -169,6 +194,9 @@ def summarize_with_gemini(title: str, content: str = "") -> str:
                 contents=prompt,
             )
             result = response.text.strip()
+            # Gemini가 간혹 "PASS: ..." 또는 "PASS ..." 형태로 응답하는 경우 접두어 제거
+            if result.upper().startswith("PASS"):
+                result = result[4:].lstrip(":").strip()
             logger.info(f"🤖 Gemini 결과: {result[:50]}")
             time.sleep(13)  # 무료 티어 분당 5회 제한 준수
             return result
@@ -449,6 +477,58 @@ def _scrape_seoul_board(url: str, label: str, base_domain: str, limit: int = 15)
 
 
 # ─────────────────────────────────────────────
+# G5 BBS 공통 스크래퍼 (노인복지관 사이트용)
+# 그누보드5(G5) 기반 게시판 표준 구조 처리
+# ─────────────────────────────────────────────
+def _scrape_g5_board(url: str, label: str, base_domain: str, limit: int = 15, verify_ssl: bool = True) -> list[dict]:
+    """G5 BBS 표준 게시판 스크래핑 (노인복지관 사이트 공통).
+
+    verify_ssl=False: 대상 서버 인증서 만료 등으로 검증 불가한 경우 사용
+    (예: 종로노인복지관 — 2026-04 기준 SSL 인증서 만료 상태)."""
+    articles = []
+    try:
+        res = requests.get(url, headers=HEADERS, timeout=15, verify=verify_ssl)
+        res.raise_for_status()
+        soup = BeautifulSoup(res.text, "lxml")
+
+        rows = soup.select("table tbody tr")
+        logger.info(f"{label}: {len(rows)}개 행 발견")
+
+        for row in rows[:limit]:
+            try:
+                # 게시글 링크 선택 — G5 보드는 td.td_subject 내부에 카테고리 링크(a.bo_cate_link)와
+                # 실제 글 링크가 공존하므로 wr_id 포함 링크를 우선 선택해야 함.
+                # 콤마 셀렉터는 문서 순서로 첫 매치를 반환해 카테고리 링크가 잡히는 문제가 있음.
+                link_tag = (
+                    row.select_one('a[href*="wr_id="]')
+                    or row.select_one('a.bo_tit')
+                    or row.select_one('td.td_subject a:not(.bo_cate_link)')
+                    or row.select_one('td.subject a')
+                    or row.select_one('td a')
+                )
+                if not link_tag:
+                    continue
+                title = link_tag.get_text(strip=True)
+                href  = link_tag.get("href", "")
+                if not title or href.startswith("javascript:"):
+                    continue
+                if href.startswith("/"):
+                    detail_url = base_domain + href
+                elif href.startswith("http"):
+                    detail_url = href
+                elif href.startswith("?"):
+                    detail_url = url.split("?")[0] + href
+                else:
+                    continue
+                articles.append({"title": title, "url": detail_url, "content": "", "source": label})
+            except Exception as e:
+                logger.warning(f"⚠️ {label} 행 파싱 오류: {e}")
+    except Exception as e:
+        logger.error(f"❌ {label} 스크래핑 오류: {e}")
+    return articles
+
+
+# ─────────────────────────────────────────────
 # Track A-4: 강북구청 채용공고
 # ─────────────────────────────────────────────
 def scrape_gangbuk_jobs() -> list[dict]:
@@ -563,6 +643,368 @@ def scrape_eunpyeong() -> list[dict]:
 
 
 # ─────────────────────────────────────────────
+# Track A-11b: 종로구청 채용공고
+# 도메인: www.jongno.go.kr
+# 특이사항: 링크가 `javascript:viewMove('nttId')` 형식 →
+#   상세 URL을 /portal/bbs/selectBoardArticle.do?bbsId=...&menuNo=...&menuId=...&nttId=... 로 조합
+# 확인: 2026-04-09 ✅ 10행 수집
+# ─────────────────────────────────────────────
+def scrape_jongno() -> list[dict]:
+    import re as _re
+    BBS_ID = "BBSMSTR_000000000026"
+    MENU_NO = "400510"
+    list_url = f"https://www.jongno.go.kr/portal/bbs/selectBoardList.do?bbsId={BBS_ID}&menuId={MENU_NO}&menuNo={MENU_NO}"
+    label = "🏢 종로구청"
+    articles = []
+    try:
+        res = requests.get(list_url, headers=HEADERS, timeout=15)
+        res.raise_for_status()
+        soup = BeautifulSoup(res.text, "lxml")
+        rows = soup.select("table tbody tr")
+        logger.info(f"{label}: {len(rows)}개 행 발견")
+        for row in rows[:15]:
+            try:
+                link_tag = row.select_one("td.subject a, td.title a, td a")
+                if not link_tag:
+                    continue
+                title = link_tag.get_text(strip=True)
+                href = link_tag.get("href", "")
+                # viewMove('253705') → nttId 추출
+                m = _re.search(r"viewMove\(\s*'(\d+)'\s*\)", href)
+                if not (title and m):
+                    continue
+                ntt_id = m.group(1)
+                detail_url = (
+                    f"https://www.jongno.go.kr/portal/bbs/selectBoardArticle.do?"
+                    f"bbsId={BBS_ID}&menuNo={MENU_NO}&menuId={MENU_NO}&nttId={ntt_id}"
+                )
+                articles.append({"title": title, "url": detail_url, "content": "", "source": "종로구청"})
+            except Exception as e:
+                logger.warning(f"⚠️ {label} 행 파싱 오류: {e}")
+    except Exception as e:
+        logger.error(f"❌ {label} 스크래핑 오류: {e}")
+    return articles
+
+
+# ─────────────────────────────────────────────
+# Track A-11c: 중구청 모집공고
+# URL: https://www.junggu.seoul.kr/content.do?cmsid=15450
+# 링크 형식: /content.do?cmsid=15450&mode=view&cid=... (상대경로)
+# 확인: 2026-04-09 ✅ 11행 수집
+# ─────────────────────────────────────────────
+def scrape_junggu() -> list[dict]:
+    return _scrape_seoul_board(
+        "https://www.junggu.seoul.kr/content.do?cmsid=15450",
+        "🏢 중구청", "https://www.junggu.seoul.kr", limit=15
+    )
+
+
+# ─────────────────────────────────────────────
+# Track A-11d: 용산구청 고시공고 (채용·공사 등 통합 공고 게시판)
+# URL: https://yongsan.go.kr/portal/bbs/B0000095/list.do?menuNo=200233
+# 링크 형식: /portal/bbs/B0000095/view.do?nttId=...&menuNo=200233 (상대경로)
+# 확인: 2026-04-09 ✅ 10행 수집
+# ─────────────────────────────────────────────
+def scrape_yongsan() -> list[dict]:
+    return _scrape_seoul_board(
+        "https://yongsan.go.kr/portal/bbs/B0000095/list.do?menuNo=200233",
+        "🏢 용산구청", "https://yongsan.go.kr", limit=15
+    )
+
+
+# ─────────────────────────────────────────────
+# Track A-11e: 서대문구청 채용공고
+# URL: https://www.sdm.go.kr/genre/economic/jobinfo/jobs.do
+# 특이사항: 링크가 `javascript:goView('sdmBoardSeq')` → goView는 form에
+#   sdmBoardSeq / mode=view 세팅 후 현재 페이지로 submit. 상세 URL 패턴:
+#   {list_url}?mode=view&sdmBoardSeq={seq}
+# 확인: 2026-04-09 ✅ 10행 수집
+# ─────────────────────────────────────────────
+def scrape_seodaemun() -> list[dict]:
+    import re as _re
+    list_url = "https://www.sdm.go.kr/genre/economic/jobinfo/jobs.do"
+    label = "🏢 서대문구청"
+    articles = []
+    try:
+        res = requests.get(list_url, headers=HEADERS, timeout=15)
+        res.raise_for_status()
+        # 서대문구청은 EUC-KR 인코딩 — utf-8 강제 시 mojibake 발생.
+        # requests가 Content-Type 헤더(charset=EUC-KR)에서 자동 감지하므로 별도 설정 없음.
+        soup = BeautifulSoup(res.text, "lxml")
+        rows = soup.select("table tbody tr")
+        logger.info(f"{label}: {len(rows)}개 행 발견")
+        for row in rows[:15]:
+            try:
+                link_tag = row.select_one("td.subject a, td.title a, td a")
+                if not link_tag:
+                    continue
+                title = link_tag.get_text(strip=True)
+                href = link_tag.get("href", "")
+                m = _re.search(r"goView\(\s*'(\d+)'\s*\)", href)
+                if not (title and m):
+                    continue
+                detail_url = f"{list_url}?mode=view&sdmBoardSeq={m.group(1)}"
+                articles.append({"title": title, "url": detail_url, "content": "", "source": "서대문구청"})
+            except Exception as e:
+                logger.warning(f"⚠️ {label} 행 파싱 오류: {e}")
+    except Exception as e:
+        logger.error(f"❌ {label} 스크래핑 오류: {e}")
+    return articles
+
+
+# ─────────────────────────────────────────────
+# Track A-12: 구립수락노인종합복지관 (노원구)
+# URL: https://suraknoin.or.kr/bbs/board.php?bo_table=0201
+# 확인: G5 BBS 표준 구조
+# ─────────────────────────────────────────────
+def scrape_surak_welfare() -> list[dict]:
+    return _scrape_g5_board(
+        "https://suraknoin.or.kr/bbs/board.php?bo_table=0201",
+        "수락노인복지관", "https://suraknoin.or.kr", limit=15
+    )
+
+
+# ─────────────────────────────────────────────
+# Track A-13: 시립노원노인종합복지관 (노원구)
+# URL: https://www.nowonsenior.or.kr/bbs/board.php?bo_table=board01
+# 확인: G5 BBS 표준 구조
+# ─────────────────────────────────────────────
+def scrape_nowon_welfare() -> list[dict]:
+    return _scrape_g5_board(
+        "https://www.nowonsenior.or.kr/bbs/board.php?bo_table=board01",
+        "노원노인복지관", "https://www.nowonsenior.or.kr", limit=15
+    )
+
+
+# ─────────────────────────────────────────────
+# Track A-14: 신내노인종합복지관 (중랑구)
+# URL: http://shinnaesenior.or.kr/bbs/board.php?bo_table=0401
+# 확인: G5 BBS 표준 구조
+# ─────────────────────────────────────────────
+def scrape_shinnae_welfare() -> list[dict]:
+    return _scrape_g5_board(
+        "http://shinnaesenior.or.kr/bbs/board.php?bo_table=0401",
+        "신내노인복지관", "http://shinnaesenior.or.kr", limit=15
+    )
+
+
+# ─────────────────────────────────────────────
+# Track A-15: 마포노인종합복지관 (마포구)
+# URL: http://senior21.or.kr/bbs/board.php?bo_table=notice
+# 확인: G5 BBS 표준 구조
+# ─────────────────────────────────────────────
+def scrape_mapo_welfare() -> list[dict]:
+    # data-wr-id 속성으로 URL 조합하는 커스텀 구조
+    url      = "https://senior21.or.kr/bbs/board.php?bo_table=MPB_2010&lang=ko&me_code=2010"
+    articles = []
+    try:
+        res = requests.get(url, headers=HEADERS, timeout=15)
+        res.raise_for_status()
+        soup = BeautifulSoup(res.text, "lxml")
+
+        rows = soup.select("tbody tr.list-row-clickable[data-wr-id]")
+        logger.info(f"마포노인복지관: {len(rows)}개 행 발견")
+
+        for row in rows[:15]:
+            try:
+                wr_id = row.get("data-wr-id", "").strip()
+                if not wr_id:
+                    continue
+                # 제목: 두 번째 td 또는 .card-subject
+                title_tag = row.select_one("td:nth-child(2), .card-subject")
+                if not title_tag:
+                    continue
+                title = title_tag.get_text(strip=True)
+                if not title:
+                    continue
+                detail_url = f"https://senior21.or.kr/bbs/board.php?bo_table=MPB_2010&wr_id={wr_id}&lang=ko&me_code=2010"
+                articles.append({"title": title, "url": detail_url, "content": "", "source": "마포노인복지관"})
+            except Exception as e:
+                logger.warning(f"⚠️ 마포노인복지관 행 파싱 오류: {e}")
+    except Exception as e:
+        logger.error(f"❌ 마포노인복지관 스크래핑 오류: {e}")
+    return articles
+
+
+# ─────────────────────────────────────────────
+# Track A-15c: 약수노인종합복지관 (중구)
+# URL: http://www.yssenior.co.kr/bbs/board.php?bo_table=notice
+# 구조: G5 BBS 표준
+# ─────────────────────────────────────────────
+def scrape_yaksu_welfare() -> list[dict]:
+    return _scrape_g5_board(
+        "http://www.yssenior.co.kr/bbs/board.php?bo_table=notice",
+        "약수노인복지관", "http://www.yssenior.co.kr", limit=15
+    )
+
+
+# ─────────────────────────────────────────────
+# Track A-15d: 시립용산노인종합복지관 (용산구)
+# URL: https://www.ysnoin.or.kr/bbs/board.php?bo_table=0101
+# 구조: G5 BBS 표준
+# ─────────────────────────────────────────────
+def scrape_yongsan_welfare() -> list[dict]:
+    return _scrape_g5_board(
+        "https://www.ysnoin.or.kr/bbs/board.php?bo_table=0101",
+        "용산노인복지관", "https://www.ysnoin.or.kr", limit=15
+    )
+
+
+# ─────────────────────────────────────────────
+# Track A-15e: 서대문노인종합복지관 (서대문구)
+# URL: http://www.sdmsenior.or.kr/main/sub.html?boardID=www44&page=1
+# 구조: 은평노인복지관(ep-silver.org)과 동일한 anyboard/Mode=view 시스템
+# ─────────────────────────────────────────────
+def scrape_seodaemun_welfare() -> list[dict]:
+    url      = "http://www.sdmsenior.or.kr/main/sub.html?boardID=www44&page=1"
+    base     = "http://www.sdmsenior.or.kr"
+    articles = []
+    try:
+        res = requests.get(url, headers=HEADERS, timeout=15)
+        res.raise_for_status()
+        res.encoding = 'utf-8'
+        soup = BeautifulSoup(res.text, "lxml")
+
+        links = soup.select("a[href*='Mode=view']")
+        logger.info(f"서대문노인복지관: {len(links)}개 링크 발견")
+
+        seen = set()
+        for link_tag in links:
+            try:
+                title = link_tag.get_text(strip=True)
+                href  = link_tag.get("href", "")
+                # num={id} 기준으로 중복 링크(같은 글의 제목·본문 anchor) 제거
+                import re as _re
+                num_m = _re.search(r"num=(\d+)", href)
+                if not (title and href and num_m):
+                    continue
+                key = num_m.group(1)
+                if key in seen:
+                    continue
+                seen.add(key)
+                if href.startswith("/"):
+                    detail_url = base + href
+                elif href.startswith("http"):
+                    detail_url = href
+                else:
+                    continue
+                articles.append({"title": title, "url": detail_url, "content": "", "source": "서대문노인복지관"})
+                if len(articles) >= 15:
+                    break
+            except Exception as e:
+                logger.warning(f"⚠️ 서대문노인복지관 파싱 오류: {e}")
+    except Exception as e:
+        logger.error(f"❌ 서대문노인복지관 스크래핑 오류: {e}")
+    return articles
+
+
+# ─────────────────────────────────────────────
+# Track A-15b: 종로노인종합복지관 (종로구)
+# URL: https://jongnonoin.or.kr/bbs/board.php?bo_table=050101
+# 구조: G5 BBS 표준
+# 특이사항: SSL 인증서 만료(2026-04 기준) → verify_ssl=False 필요
+# ─────────────────────────────────────────────
+def scrape_jongno_welfare() -> list[dict]:
+    return _scrape_g5_board(
+        "https://jongnonoin.or.kr/bbs/board.php?bo_table=050101",
+        "종로노인복지관", "https://jongnonoin.or.kr", limit=15, verify_ssl=False
+    )
+
+
+# ─────────────────────────────────────────────
+# Track A-16: 시립강북노인종합복지관 (강북구)
+# URL: https://www.gswc.or.kr/bbs/board.php?bo_table=0201_1
+# 확인: G5 BBS 표준 구조
+# ─────────────────────────────────────────────
+def scrape_gangbuk_welfare() -> list[dict]:
+    return _scrape_g5_board(
+        "https://www.gswc.or.kr/bbs/board.php?bo_table=0201_1",
+        "강북노인복지관", "https://www.gswc.or.kr", limit=15
+    )
+
+
+# ─────────────────────────────────────────────
+# Track A-17: 도봉노인종합복지관 (도봉구)
+# URL: https://dobongnoin.or.kr/notice
+# 확인: 커스텀 라우팅 (테이블/리스트 구조)
+# ─────────────────────────────────────────────
+def scrape_dobong_welfare() -> list[dict]:
+    url      = "https://dobongnoin.or.kr/notice"
+    articles = []
+    try:
+        res = requests.get(url, headers=HEADERS, timeout=15)
+        res.raise_for_status()
+        soup = BeautifulSoup(res.text, "lxml")
+
+        rows = soup.select("table tbody tr, ul.notice_list li, div.board_list dl")
+        if not rows:
+            rows = soup.select("table tbody tr")
+        logger.info(f"도봉노인복지관: {len(rows)}개 행 발견")
+
+        for row in rows[:15]:
+            try:
+                link_tag = row.select_one("td.subject a, td.title a, a.subject, td a, a")
+                if not link_tag:
+                    continue
+                title = link_tag.get_text(strip=True)
+                href  = link_tag.get("href", "")
+                if not title or href.startswith("javascript:"):
+                    continue
+                if href.startswith("/"):
+                    detail_url = "https://dobongnoin.or.kr" + href
+                elif href.startswith("http"):
+                    detail_url = href
+                else:
+                    continue
+                articles.append({"title": title, "url": detail_url, "content": "", "source": "도봉노인복지관"})
+            except Exception as e:
+                logger.warning(f"⚠️ 도봉노인복지관 행 파싱 오류: {e}")
+    except Exception as e:
+        logger.error(f"❌ 도봉노인복지관 스크래핑 오류: {e}")
+    return articles
+
+
+# ─────────────────────────────────────────────
+# Track A-18: 시립은평노인종합복지관 (은평구)
+# URL: https://www.ep-silver.org/main/sub.html?boardID=www39
+# 확인: 커스텀 boardID 시스템
+# ─────────────────────────────────────────────
+def scrape_eunpyeong_welfare() -> list[dict]:
+    # anyboard 시스템 — Mode=view 파라미터 링크 추출
+    url      = "https://www.ep-silver.org/main/sub.html?boardID=www39&page=1"
+    articles = []
+    try:
+        res = requests.get(url, headers=HEADERS, timeout=15)
+        res.raise_for_status()
+        res.encoding = 'utf-8'  # 인코딩 명시 (requests 자동 감지 오류 방지)
+        soup = BeautifulSoup(res.text, "lxml")
+
+        links = soup.select("a[href*='Mode=view']")
+        logger.info(f"은평노인복지관: {len(links)}개 링크 발견")
+
+        seen = set()
+        for link_tag in links[:15]:
+            try:
+                title = link_tag.get_text(strip=True)
+                href  = link_tag.get("href", "")
+                if not title or not href or href in seen:
+                    continue
+                seen.add(href)
+                if href.startswith("/"):
+                    detail_url = "https://www.ep-silver.org" + href
+                elif href.startswith("http"):
+                    detail_url = href
+                else:
+                    continue
+                articles.append({"title": title, "url": detail_url, "content": "", "source": "은평노인복지관"})
+            except Exception as e:
+                logger.warning(f"⚠️ 은평노인복지관 파싱 오류: {e}")
+    except Exception as e:
+        logger.error(f"❌ 은평노인복지관 스크래핑 오류: {e}")
+    return articles
+
+
+# ─────────────────────────────────────────────
 # 메인 파이프라인
 # ─────────────────────────────────────────────
 def run_scraping_pipeline(request=None):
@@ -580,10 +1022,26 @@ def run_scraping_pipeline(request=None):
         scrape_jungnang,
         scrape_mapo,
         scrape_eunpyeong,
+        scrape_jongno,           # 종로 ✅ (2026-04-09 추가)
+        scrape_junggu,           # 중구 ✅ (2026-04-09 추가)
+        scrape_yongsan,          # 용산 ✅ (2026-04-09 추가)
+        scrape_seodaemun,        # 서대문 ✅ (2026-04-09 추가)
+        # 노인복지관 (접속 가능한 8개)
+        scrape_surak_welfare,    # 노원 수락 ✅
+        scrape_mapo_welfare,     # 마포 ✅
+        scrape_dobong_welfare,   # 도봉 ✅
+        scrape_eunpyeong_welfare, # 은평 ✅
+        scrape_jongno_welfare,   # 종로 ✅ (2026-04-09 추가, SSL 만료로 verify=False)
+        scrape_yaksu_welfare,    # 중구 약수 ✅ (2026-04-09 추가)
+        scrape_yongsan_welfare,  # 용산 ✅ (2026-04-09 추가)
+        scrape_seodaemun_welfare, # 서대문 ✅ (2026-04-09 추가)
+        # scrape_nowon_welfare   — 게시판 없음 (존재하지 않는 bo_table)
+        # scrape_shinnae_welfare — SSL 인증서 오류
+        # scrape_gangbuk_welfare — 403 Forbidden
     ]
 
     all_articles: list[dict] = []
-    with concurrent.futures.ThreadPoolExecutor(max_workers=11) as executor:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=19) as executor:
         futures = {executor.submit(fn): fn.__name__ for fn in scrapers}
         for future in concurrent.futures.as_completed(futures):
             fn_name = futures[future]
@@ -621,7 +1079,7 @@ def run_scraping_pipeline(request=None):
             # 본문이 없으면 상세 페이지에서 가져옴
             if not content:
                 content = fetch_detail_content(url, source)
-            ai_summary = summarize_with_gemini(title, content)
+            ai_summary = summarize_with_gemini(title, content, source)
             if ai_summary.strip().upper() == "SKIP":
                 logger.info(f"🚫 AI 필터링: {title[:30]}")
                 continue

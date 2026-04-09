@@ -40,6 +40,19 @@ SOURCE_TOPIC_MAP = {
     "중랑구청":           "jungnang",
     "마포구청":           "mapo",
     "은평구청":           "eunpyeong",
+    "종로구청":           "jongno",
+    "중구청":             "junggu",
+    "용산구청":           "yongsan",
+    "서대문구청":         "seodaemun",
+    # 노인복지관 (구청 토픽에 통합, 접속 가능한 6개)
+    "수락노인복지관":     "nowon",
+    "마포노인복지관":     "mapo",
+    "도봉노인복지관":     "dobong",
+    "은평노인복지관":     "eunpyeong",
+    "종로노인복지관":     "jongno",
+    "약수노인복지관":     "junggu",
+    "용산노인복지관":     "yongsan",
+    "서대문노인복지관":   "seodaemun",
 }
 
 
