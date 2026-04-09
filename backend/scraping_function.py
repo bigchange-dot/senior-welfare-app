@@ -1076,6 +1076,19 @@ def run_scraping_pipeline(request=None):
             ai_summary = f"📢 {title[:28]}"
             logger.info(f"📋 복지로 직접 저장: {ai_summary}")
         else:
+            # 키워드 프리필터: 복지관 출처는 이미 어르신 대상 기관이라 통과.
+            # 구청 등 일반 출처는 제목에 노인 관련 키워드가 없으면 Gemini 호출 생략
+            # → Gemini 무료 티어 분당 5회 제한(sleep 13초) 때문에 전체 실행 시간을
+            #   크게 줄이기 위한 최적화. 함수 timeout 초과 방지.
+            SENIOR_KEYWORDS = (
+                "노인", "어르신", "경로", "실버", "시니어", "고령", "65세",
+                "요양", "돌봄", "치매", "장사", "기초연금", "복지관", "경로당",
+            )
+            if source not in WELFARE_CENTER_SOURCES and not any(k in title for k in SENIOR_KEYWORDS):
+                logger.info(f"⏭️  키워드 필터: {title[:30]}")
+                skipped_count += 1
+                continue
+
             # 본문이 없으면 상세 페이지에서 가져옴
             if not content:
                 content = fetch_detail_content(url, source)

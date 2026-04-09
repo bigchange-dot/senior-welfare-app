@@ -14,7 +14,7 @@ from notification_function import on_welfare_notice_created
 # ─────────────────────────────────────────────
 @https_fn.on_request(
     region="asia-northeast3",       # 서울 리전
-    timeout_sec=540,                # 9분 (API + 스크래핑 충분한 시간)
+    timeout_sec=1800,               # 30분 (Gemini rate limit sleep 13초 × 100+건 대응)
     memory=options.MemoryOption.MB_512,
     secrets=["GEMINI_API_KEY", "DATA_GO_KR_KEY"],
 )
