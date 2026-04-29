@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  HTTP(비암호화) 허용 도메인 화이트리스트
+  - yssenior.co.kr     : 약수노인종합복지관
+  - sdmsenior.or.kr    : 서대문노인종합복지관
+  - ep.go.kr           : 은평구청
+  나머지 도메인은 기본 정책(HTTPS만) 적용
+-->
+<network-security-config>
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="true">yssenior.co.kr</domain>
+        <domain includeSubdomains="true">sdmsenior.or.kr</domain>
+        <domain includeSubdomains="true">ep.go.kr</domain>
+    </domain-config>
+</network-security-config>
