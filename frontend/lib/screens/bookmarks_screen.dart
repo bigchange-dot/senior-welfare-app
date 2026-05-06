@@ -16,6 +16,27 @@ class BookmarksScreen extends StatefulWidget {
   State<BookmarksScreen> createState() => BookmarksScreenState();
 }
 
+// 설정 화면의 region source(구청)를 Firestore의 실제 source 목록으로 확장.
+// home_screen.dart의 _FilterChipData.sources 매핑과 동일하게 유지해야 함.
+const Map<String, List<String>> _regionToSources = {
+  '복지로':     ['복지로'],
+  '노원구청':   ['노원구청', '수락노인복지관'],
+  '도봉구청':   ['도봉구청', '도봉노인복지관'],
+  '중랑구청':   ['중랑구청'],
+  '마포구청':   ['마포구청', '마포노인복지관'],
+  '은평구청':   ['은평구청', '은평노인복지관'],
+  '성동구청':   ['성동구청', '성동구 어르신일자리'],
+  '강북구청':   ['강북구청'],
+  '종로구청':   ['종로구청', '종로노인복지관'],
+  '중구청':     ['중구청', '약수노인복지관'],
+  '용산구청':   ['용산구청', '용산노인복지관'],
+  '서대문구청': ['서대문구청', '서대문노인복지관'],
+  '강서구청':   ['강서구청'],
+  '동작구청':   ['동작구청'],
+  '관악구청':   ['관악구청'],
+  '양천구청':   ['양천구청'],
+};
+
 class BookmarksScreenState extends State<BookmarksScreen> {
   List<WelfareNotice> _bookmarkedNotices = [];
   List<WelfareNotice> _regionNotices     = [];
@@ -64,8 +85,13 @@ class BookmarksScreenState extends State<BookmarksScreen> {
     final prefs = await SharedPreferences.getInstance();
     _selectedSources = prefs.getStringList('selected_sources') ?? [];
 
-    // 빈 문자열('전체') 제거 — whereIn에 빈 값 전달 방지
-    final sources = _selectedSources.where((s) => s.isNotEmpty).toList();
+    // 빈 문자열('전체') 제거 + 구청 → 구청+복지관 매핑으로 확장
+    // 예: ['도봉구청'] → ['도봉구청', '도봉노인복지관']
+    final sources = _selectedSources
+        .where((s) => s.isNotEmpty)
+        .expand((s) => _regionToSources[s] ?? [s])
+        .toSet()
+        .toList();
 
     if (sources.isEmpty) {
       _regionNotices = [];

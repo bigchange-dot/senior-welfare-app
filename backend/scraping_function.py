@@ -559,20 +559,24 @@ def scrape_gangbuk_media() -> list[dict]:
 
 
 # ─────────────────────────────────────────────
-# Track A-7: 노원구청 채용 공고
+# Track A-7: 노원구청 채용 공고 + 공지사항
 # 도메인: nowon.kr (nowon.go.kr 아님 — SSL 불일치)
 # 링크 형식: javascript:opView('ID') → 상세 URL 직접 생성
-# 확인: 2026-03-12 ✅ 193건 게시판 정상
+# 확인: 2026-05-06 — q_bbsCode=1003(채용)은 어르신 매치 0/10 → 1001(공지) 추가
 # ─────────────────────────────────────────────
-def scrape_nowon() -> list[dict]:
-    url      = "https://www.nowon.kr/www/user/bbs/BD_selectBbsList.do?q_bbsCode=1003&q_estnColumn7=Y"
+def _scrape_nowon_board(bbs_code: str, label: str) -> list[dict]:
+    """노원구청 게시판 공통 스크래핑.
+    1003(채용)은 javascript:opView('id') 형식, 1001(공지)은 직접 href 형식.
+    """
+    url      = f"https://www.nowon.kr/www/user/bbs/BD_selectBbsList.do?q_bbsCode={bbs_code}"
     articles = []
+    base     = "https://www.nowon.kr/www/user/bbs/"
     try:
         res = requests.get(url, headers=HEADERS, timeout=15)
         res.raise_for_status()
         soup = BeautifulSoup(res.text, "lxml")
         rows = soup.select("table tbody tr")
-        logger.info(f"🏢 노원구청: {len(rows)}개 행 발견")
+        logger.info(f"{label}: {len(rows)}개 행 발견")
         for row in rows[:15]:
             try:
                 link_tag = row.select_one("td a")
@@ -580,31 +584,52 @@ def scrape_nowon() -> list[dict]:
                     continue
                 title = link_tag.get_text(strip=True)
                 href  = link_tag.get("href", "")
-                # javascript:opView('ID') 패턴에서 ID 추출
-                m = re.search(r"opView\('([^']+)'", href)
-                if not m:
+                if not title:
                     continue
-                post_id    = m.group(1)
-                detail_url = f"https://www.nowon.kr/www/user/bbs/BD_selectBbsDetail.do?q_bbsCode=1003&q_bbscttSn={post_id}"
-                if title:
-                    articles.append({"title": title, "url": detail_url, "content": "", "source": "노원구청"})
+                # 1) javascript:opView('id') 패턴
+                m = re.search(r"opView\('([^']+)'", href)
+                if m:
+                    detail_url = f"https://www.nowon.kr/www/user/bbs/BD_selectBbsDetail.do?q_bbsCode={bbs_code}&q_bbscttSn={m.group(1)}"
+                # 2) 직접 BD_selectBbs.do?... 상대경로 (공지사항)
+                elif href.startswith("BD_selectBbs"):
+                    detail_url = base + href
+                elif href.startswith("/"):
+                    detail_url = "https://www.nowon.kr" + href
+                else:
+                    continue
+                articles.append({"title": title, "url": detail_url, "content": "", "source": "노원구청"})
             except Exception as e:
-                logger.warning(f"⚠️ 노원구청 행 파싱 오류: {e}")
+                logger.warning(f"⚠️ {label} 행 파싱 오류: {e}")
     except Exception as e:
-        logger.error(f"❌ 노원구청 스크래핑 오류: {e}")
+        logger.error(f"❌ {label} 스크래핑 오류: {e}")
     return articles
 
 
+def scrape_nowon() -> list[dict]:
+    # 1003=채용공고, 1001=공지사항 (어르신 관련 공고 다양)
+    return _scrape_nowon_board("1003", "🏢 노원구청 채용") + \
+           _scrape_nowon_board("1001", "🏢 노원구청 공지")
+
+
 # ─────────────────────────────────────────────
-# Track A-8: 도봉구청 공지사항 (채용공고 동적 로딩 불가 → 공지사항으로 대체)
+# Track A-8: 도봉구청 공지사항 + 행사/모집 (어르신 전용 게시판 없음)
+# code=10008769 공지사항, code=10008770 행사/모집
 # 링크 형식: ./bbs.asp?bmode=D&... (상대경로, 직접 URL)
-# 확인: 2026-03-12 ✅ 게시글 정상 확인
+# 확인: 2026-05-06 — 공지사항만으론 어르신 키워드 매치 1/10 → 두 게시판 통합
 # ─────────────────────────────────────────────
 def scrape_dobong() -> list[dict]:
-    return _scrape_seoul_board(
+    articles = _scrape_seoul_board(
         "https://www.dobong.go.kr/bbs.asp?code=10008769",
-        "🏢 도봉구청", "https://www.dobong.go.kr", limit=15
+        "🏢 도봉구청 공지", "https://www.dobong.go.kr", limit=15
     )
+    articles += _scrape_seoul_board(
+        "https://www.dobong.go.kr/bbs.asp?code=10008770",
+        "🏢 도봉구청 행사모집", "https://www.dobong.go.kr", limit=15
+    )
+    # source 통일 (label.split()[-1] 결과를 덮어씀)
+    for a in articles:
+        a["source"] = "도봉구청"
+    return articles
 
 
 # ─────────────────────────────────────────────
@@ -630,16 +655,24 @@ def scrape_mapo() -> list[dict]:
 
 
 # ─────────────────────────────────────────────
-# Track A-11: 은평구청 구인·구직 공고
+# Track A-11: 은평구청 공지사항 + 보도자료
 # 도메인: ep.go.kr (http:// — https:// 타임아웃 발생)
 # 링크 형식: ./selectBbsNttView.do?... (상대경로, 직접 URL)
-# 확인: 2026-03-12 ✅ 게시판 정상 (채용공고 다수 확인)
+# 확인: 2026-05-06 — 채용 게시판(bbsNo=46)은 직원 채용만 올라와 Gemini 100% SKIP
+#       → 공지사항(bbsNo=42) + 보도자료(bbsNo=48) 통합
 # ─────────────────────────────────────────────
 def scrape_eunpyeong() -> list[dict]:
-    return _scrape_seoul_board(
-        "http://www.ep.go.kr/www/selectBbsNttList.do?key=750&bbsNo=46",
-        "🏢 은평구청", "http://www.ep.go.kr", limit=15
+    articles = _scrape_seoul_board(
+        "http://www.ep.go.kr/www/selectBbsNttList.do?bbsNo=42&key=744",
+        "🏢 은평구청 공지", "http://www.ep.go.kr", limit=15
     )
+    articles += _scrape_seoul_board(
+        "http://www.ep.go.kr/www/selectBbsNttList.do?bbsNo=48&key=762",
+        "🏢 은평구청 보도", "http://www.ep.go.kr", limit=15
+    )
+    for a in articles:
+        a["source"] = "은평구청"
+    return articles
 
 
 # ─────────────────────────────────────────────
@@ -745,6 +778,109 @@ def scrape_seodaemun() -> list[dict]:
                     continue
                 detail_url = f"{list_url}?mode=view&sdmBoardSeq={m.group(1)}"
                 articles.append({"title": title, "url": detail_url, "content": "", "source": "서대문구청"})
+            except Exception as e:
+                logger.warning(f"⚠️ {label} 행 파싱 오류: {e}")
+    except Exception as e:
+        logger.error(f"❌ {label} 스크래핑 오류: {e}")
+    return articles
+
+
+# ─────────────────────────────────────────────
+# Track A-11f: 강서구청 공지사항
+# URL: https://www.gangseo.seoul.kr/gs020502
+# 링크 형식: /gs020502/319334?... (절대경로) — 표준 헬퍼 사용
+# 확인: 2026-05-06 ✅ 10행 수집
+# ─────────────────────────────────────────────
+def scrape_gangseo() -> list[dict]:
+    return _scrape_seoul_board(
+        "https://www.gangseo.seoul.kr/gs020502",
+        "🏢 강서구청", "https://www.gangseo.seoul.kr", limit=15
+    )
+
+
+# ─────────────────────────────────────────────
+# Track A-11g: 동작구청 공지사항
+# URL: https://www.dongjak.go.kr/portal/bbs/B0001396/list.do?menuNo=201658
+# 링크 형식: /portal/bbs/B0001396/view.do?nttId=...&menuNo=201658 (절대경로)
+# 확인: 2026-05-06 ✅ 10행 수집
+# ─────────────────────────────────────────────
+def scrape_dongjak() -> list[dict]:
+    return _scrape_seoul_board(
+        "https://www.dongjak.go.kr/portal/bbs/B0001396/list.do?menuNo=201658",
+        "🏢 동작구청", "https://www.dongjak.go.kr", limit=15
+    )
+
+
+# ─────────────────────────────────────────────
+# Track A-11h: 관악구청 공지사항
+# URL: https://www.gwanak.go.kr/site/365/bbs/list.do?cbIdx=302
+# 링크 형식: onclick="doBbsFView('302','198737','16010100','198737')"
+#   → /site/365/bbs/view.do?cbIdx=302&bcIdx=198737 (Gbn은 menuId, parentSeq는 동일)
+# 확인: 2026-05-06 ✅
+# ─────────────────────────────────────────────
+def scrape_gwanak() -> list[dict]:
+    list_url = "https://www.gwanak.go.kr/site/365/bbs/list.do?cbIdx=302"
+    label    = "🏢 관악구청"
+    articles = []
+    try:
+        res = requests.get(list_url, headers=HEADERS, timeout=15)
+        res.raise_for_status()
+        soup = BeautifulSoup(res.text, "lxml")
+        rows = soup.select("table tbody tr")
+        logger.info(f"{label}: {len(rows)}개 행 발견")
+        for row in rows[:15]:
+            try:
+                a = row.select_one("td.title a, td.subject a")
+                if not a:
+                    continue
+                title = a.get_text(strip=True)
+                onclick = a.get("onclick", "")
+                m = re.search(r"doBbsFView\(\s*'(\d+)'\s*,\s*'(\d+)'", onclick)
+                if not (title and m):
+                    continue
+                cb_idx, bc_idx = m.group(1), m.group(2)
+                detail_url = f"https://www.gwanak.go.kr/site/365/bbs/view.do?cbIdx={cb_idx}&bcIdx={bc_idx}"
+                articles.append({"title": title, "url": detail_url, "content": "", "source": "관악구청"})
+            except Exception as e:
+                logger.warning(f"⚠️ {label} 행 파싱 오류: {e}")
+    except Exception as e:
+        logger.error(f"❌ {label} 스크래핑 오류: {e}")
+    return articles
+
+
+# ─────────────────────────────────────────────
+# Track A-11i: 양천구청 공지사항
+# URL: https://www.yangcheon.go.kr/site/yangcheon/ex/bbs/List.do?cbIdx=254
+# 링크 형식: 관악과 동일한 doBbsFView() — 다만 상세 경로는 ex/bbs/View.do
+# 제목 특이사항: <script>document.write(wdigm_title('제목'))</script> 동적 렌더 →
+#   정적 파싱은 빈 텍스트 → 정규식으로 wdigm_title 인자 추출
+# 확인: 2026-05-06 ✅
+# ─────────────────────────────────────────────
+def scrape_yangcheon() -> list[dict]:
+    list_url = "https://www.yangcheon.go.kr/site/yangcheon/ex/bbs/List.do?cbIdx=254"
+    label    = "🏢 양천구청"
+    articles = []
+    try:
+        res = requests.get(list_url, headers=HEADERS, timeout=15)
+        res.raise_for_status()
+        soup = BeautifulSoup(res.text, "lxml")
+        rows = soup.select("table tbody tr")
+        logger.info(f"{label}: {len(rows)}개 행 발견")
+        for row in rows[:15]:
+            try:
+                a = row.select_one("td.subject a, td.title a")
+                if not a:
+                    continue
+                onclick = a.get("onclick", "")
+                m_id    = re.search(r"doBbsFView\(\s*'(\d+)'\s*,\s*'(\d+)'", onclick)
+                # 제목은 <script>document.write(wdigm_title('...'))</script> 안
+                m_title = re.search(r"wdigm_title\(\s*'([^']+)'", str(a))
+                if not (m_id and m_title):
+                    continue
+                cb_idx, bc_idx = m_id.group(1), m_id.group(2)
+                title = m_title.group(1).strip()
+                detail_url = f"https://www.yangcheon.go.kr/site/yangcheon/ex/bbs/View.do?cbIdx={cb_idx}&bcIdx={bc_idx}"
+                articles.append({"title": title, "url": detail_url, "content": "", "source": "양천구청"})
             except Exception as e:
                 logger.warning(f"⚠️ {label} 행 파싱 오류: {e}")
     except Exception as e:
@@ -925,11 +1061,13 @@ def scrape_gangbuk_welfare() -> list[dict]:
 
 # ─────────────────────────────────────────────
 # Track A-17: 도봉노인종합복지관 (도봉구)
-# URL: https://dobongnoin.or.kr/notice
-# 확인: 커스텀 라우팅 (테이블/리스트 구조)
+# URL: https://dobongnoin.or.kr/news (복지관소식 — 어르신 프로그램 모집/안내)
+# 참고: /notice는 회계공시·납품업체 선정 등 행정 공고 전용 → Gemini가 100% SKIP
+#       /news는 어르신 대상 강좌·상담·행사 모집 공고가 올라오는 게시판
+# 확인: 2026-05-06 ✅ 커스텀 라우팅 (테이블 구조)
 # ─────────────────────────────────────────────
 def scrape_dobong_welfare() -> list[dict]:
-    url      = "https://dobongnoin.or.kr/notice"
+    url      = "https://dobongnoin.or.kr/news"
     articles = []
     try:
         res = requests.get(url, headers=HEADERS, timeout=15)
@@ -1026,6 +1164,10 @@ def run_scraping_pipeline(request=None):
         scrape_junggu,           # 중구 ✅ (2026-04-09 추가)
         scrape_yongsan,          # 용산 ✅ (2026-04-09 추가)
         scrape_seodaemun,        # 서대문 ✅ (2026-04-09 추가)
+        scrape_gangseo,          # 강서 ✅ (2026-05-06 추가)
+        scrape_dongjak,          # 동작 ✅ (2026-05-06 추가)
+        scrape_gwanak,           # 관악 ✅ (2026-05-06 추가, doBbsFView)
+        scrape_yangcheon,        # 양천 ✅ (2026-05-06 추가, doBbsFView + wdigm_title)
         # 노인복지관 (접속 가능한 8개)
         scrape_surak_welfare,    # 노원 수락 ✅
         scrape_mapo_welfare,     # 마포 ✅
@@ -1041,7 +1183,7 @@ def run_scraping_pipeline(request=None):
     ]
 
     all_articles: list[dict] = []
-    with concurrent.futures.ThreadPoolExecutor(max_workers=19) as executor:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=23) as executor:
         futures = {executor.submit(fn): fn.__name__ for fn in scrapers}
         for future in concurrent.futures.as_completed(futures):
             fn_name = futures[future]

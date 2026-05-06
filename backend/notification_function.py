@@ -44,6 +44,10 @@ SOURCE_TOPIC_MAP = {
     "중구청":             "junggu",
     "용산구청":           "yongsan",
     "서대문구청":         "seodaemun",
+    "강서구청":           "gangseo",
+    "동작구청":           "dongjak",
+    "관악구청":           "gwanak",
+    "양천구청":           "yangcheon",
     # 노인복지관 (구청 토픽에 통합, 접속 가능한 6개)
     "수락노인복지관":     "nowon",
     "마포노인복지관":     "mapo",

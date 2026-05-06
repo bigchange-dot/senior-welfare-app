@@ -1,11 +1,50 @@
 # Senior Welfare App — 작업 현황
 
-> 마지막 업데이트: 2026-04-29 (v1.3.1+6 게시 완료)
-> 앱 버전: 1.3.1+6
+> 마지막 업데이트: 2026-05-06 (스크래핑 게시판 보강 + 강서·동작·관악·양천 추가, v1.4.0+7 검토 중)
+> 앱 버전: 1.4.0+7 (Play Console 검토 중)
+
+---
+
+## 📝 다음 빌드(v1.4.1+8) 포함 예정 — 코드는 반영, 미배포
+
+- [x] **`bookmarks_screen.dart`**: 찜 화면 "내 지역 공고"에 복지관 누락 버그 수정
+  - 원인: `selected_sources`(예: `['도봉구청']`)를 그대로 `whereIn`에 전달 → `'도봉노인복지관'` source 매치 안 됨
+  - 수정: `_regionToSources` 매핑 dict 추가 → `expand()`로 `['도봉구청', '도봉노인복지관']`으로 확장
+  - 영향 구청: 노원·도봉·마포·은평·성동·종로·중구·용산·서대문 (복지관 매핑 있는 9개)
+  - 다음 기능 묶음 빌드 시 함께 출시
 
 ---
 
 ## ✅ 완료된 작업
+
+### 2026-05-06 — 구청별 업데이트 정체 해결 + 게시판 보강
+- [x] **도봉노인복지관**: `/notice` (회계공시 전용) → `/news` (복지관소식, 어르신 모집공고)
+- [x] **도봉구청**: 공지사항(10008769) + 행사/모집(10008770) 통합 — 어르신 키워드 매치율 향상
+- [x] **은평구청**: 채용 게시판(bbsNo=46, Gemini가 100% SKIP) → 공지사항(bbsNo=42) + 보도자료(bbsNo=48)
+- [x] **노원구청**: 채용(1003) + 공지사항(1001) 통합 (1001은 직접 href 형식이라 별도 처리)
+- [x] **신규 추가 — 강서·동작·관악·양천 (총 11개 → 15개 구청)**
+  - 강서: 공지사항 (`gangseo.seoul.kr/gs020502`) — 표준 절대경로
+  - 동작: 공지사항 (`portal/bbs/B0001396`) — 표준 절대경로
+  - 관악: 공지사항 (`site/365/bbs/list.do?cbIdx=302`) — `doBbsFView()` onClick → `view.do?cbIdx&bcIdx`
+  - 양천: 공지사항 (`site/yangcheon/ex/bbs/List.do?cbIdx=254`) — `doBbsFView()` + 제목이 `wdigm_title('...')` 안에 있어 정규식 추출
+  - FCM 토픽: `gangseo`, `dongjak`, `gwanak`, `yangcheon`
+  - `home_screen.dart`, `settings_screen.dart`, `notification_function.py` 동기화
+- [x] `max_workers` 19 → 23
+- 진단: 도봉구청 마지막 저장 2026-03-31, 은평구청·도봉노인복지관 0건 (전무)
+- 원인: 게시판 자체가 회계공시·직원채용 전용이라 키워드 프리필터/Gemini가 모두 컷오프
+- 통합 테스트: 8개 변경/추가 스크래퍼 병렬 실행 → 115건 수집 확인 (Flutter analyze 통과)
+- 추후 작업: 강남·강동·구로·금천·동대문·서초·성북·송파·영등포·광진 (사이트 구조 다양 — 개별 조사 필요)
+
+### 2026-04-30 — 마케팅·수익화 셋업
+- [x] AdMob ↔ Play Store 앱 연결 완료
+- [x] TikTok For Business 가입 및 광고 캠페인 게시
+  - 크리에이티브: 가로 스크린샷 4장 (`convert_landscape.py`로 1080x2400 → 2200x1200 변환)
+  - 추가 이미지: 만세/따봉 할머니 (`cut_05b.png`, `cut_06b.png`)
+  - 최적화 목표: 랜딩페이지 조회수/클릭 (옵션 2개뿐)
+  - 지면: 자동 배치 (TikTok + Pangle)
+  - 음악: TikTok Commercial Music Library (CML)
+  - 광고 크레딧: 최대 ₩8,500,000
+- [ ] TikTok 광고 효과 모니터링 (설치수, CPI, AdMob 노출수, eCPM)
 
 ### v1.3.1+6 — 2026-04-21 (HTTP WebView 수정 + 광고 재활성화)
 - [x] HTTP cleartext 도메인 화이트리스트 추가 (`network_security_config.xml` 신규)

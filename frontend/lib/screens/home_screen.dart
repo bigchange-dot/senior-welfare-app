@@ -34,6 +34,10 @@ class _HomeScreenState extends State<HomeScreen> {
     _FilterChipData(label: '중구청',   sources: ['중구청', '약수노인복지관']),
     _FilterChipData(label: '용산구청', sources: ['용산구청', '용산노인복지관']),
     _FilterChipData(label: '서대문구청', sources: ['서대문구청', '서대문노인복지관']),
+    _FilterChipData(label: '강서구청', sources: ['강서구청']),
+    _FilterChipData(label: '동작구청', sources: ['동작구청']),
+    _FilterChipData(label: '관악구청', sources: ['관악구청']),
+    _FilterChipData(label: '양천구청', sources: ['양천구청']),
   ];
 
   int _selectedFilterIdx = 0;
