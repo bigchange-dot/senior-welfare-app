@@ -1,6 +1,6 @@
 # Senior Welfare App — 작업 현황
 
-> 마지막 업데이트: 2026-05-06 (스크래핑 게시판 보강 + 강서·동작·관악·양천 추가, v1.4.0+7 검토 중)
+> 마지막 업데이트: 2026-09-03 (Mac 이전 + 백엔드 로깅/복지로/성동 수정)
 > 앱 버전: 1.4.0+7 (Play Console 검토 중)
 
 ---
@@ -16,6 +16,20 @@
 ---
 
 ## ✅ 완료된 작업
+
+### 2026-09-03 — Mac 개발환경 이전 + 백엔드 운영 점검·수정
+
+- [x] Mac 개발환경 구축 (Homebrew: Flutter 3.47.2, openjdk@17, python@3.11, firebase-cli, gcloud) — 릴리스 APK 빌드·서명 검증 완료
+- [x] Cloud Logging에 INFO 로그 미표시 문제 해결 → `backend/log_config.py` (구조화 JSON 로그)
+- [x] 복지로 API 오류 로그에 `DATA_GO_KR_KEY` 노출 → 마스킹
+- [x] 복지로 API `numOfRows` 20→100 (총 34건 중 14건 미수집 상태였음, 4/23 이후 신규 0건) + 실행당 신규 2건 상한
+- [x] 성동노인종합복지관 스크래퍼 재작성 (사이트 개편 대응, 공지 게시판 SDS_1010) — 단, 구글 IP 403 차단으로 목록 제외
+- [x] 마포노인복지관 스크래퍼 제외 (봇 차단 403)
+- [x] Gemini SKIP 결과 캐시(`skipped_notices`) — 매 실행 44건 재호출 제거, 실행 시간 단축
+- [x] `_scrape_wr_id_board()` 공용 헬퍼 (마포·성동 복지관 동일 게시판 솔루션)
+- [ ] 중랑구청·성동노인복지관 구글 IP 차단 — 코드로 해결 불가, 한국 IP 경유 대안 검토 필요
+- [x] Firebase CLI(Homebrew) `fsevents.node` 서명 오류로 deploy 즉시 SIGKILL → `codesign -s - -f` 재서명으로 해결
+- [x] `firebase.json` functions.ignore 추가 (venv, .env.yaml 등 업로드 제외)
 
 ### 2026-05-06 — 구청별 업데이트 정체 해결 + 게시판 보강
 - [x] **도봉노인복지관**: `/notice` (회계공시 전용) → `/news` (복지관소식, 어르신 모집공고)

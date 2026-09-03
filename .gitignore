@@ -6,3 +6,5 @@ __pycache__/
 backend/=*
 backend/*adminsdk*.json
 backend/*service-account*.json
+backend/venv/
+.omc/

@@ -29,8 +29,11 @@ load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), '..', '.env'))
 GEMINI_API_KEY      = os.getenv("GEMINI_API_KEY", "")
 DATA_GO_KR_KEY      = os.getenv("DATA_GO_KR_KEY", "").strip()
 FIREBASE_COLLECTION = "welfare_notices"
+SKIPPED_COLLECTION  = "skipped_notices"   # Gemini가 SKIP 판정한 URL 캐시 (재호출 방지)
+BOKJIRO_MAX_NEW_PER_RUN = 2               # 복지로 신규 저장 상한 (알림 폭주 방지)
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+from log_config import configure_logging
+configure_logging()
 logger = logging.getLogger(__name__)
 
 # Firebase Admin 초기화 (이미 초기화된 경우 재사용)
@@ -83,6 +86,22 @@ def is_duplicate(url: str) -> bool:
     doc_id = make_doc_id(url)
     doc = _get_db().collection(FIREBASE_COLLECTION).document(doc_id).get()
     return doc.exists
+
+
+def is_skipped(url: str) -> bool:
+    """이전 실행에서 Gemini가 SKIP 판정한 URL인지 확인 (재호출 방지)."""
+    doc = _get_db().collection(SKIPPED_COLLECTION).document(make_doc_id(url)).get()
+    return doc.exists
+
+
+def mark_skipped(title: str, source: str, url: str) -> None:
+    """SKIP 판정 URL을 캐시에 기록. 매 실행마다 같은 공고를 Gemini에 다시 보내지 않도록."""
+    _get_db().collection(SKIPPED_COLLECTION).document(make_doc_id(url)).set({
+        "title":     title,
+        "source":    source,
+        "url":       url,
+        "timestamp": datetime.now(timezone.utc),
+    })
 
 
 def save_to_firestore(title: str, ai_summary: str, source: str, url: str) -> str:
@@ -208,8 +227,8 @@ def summarize_with_gemini(title: str, content: str = "", source: str = "") -> st
                 time.sleep(wait)
             else:
                 logger.error(f"❌ Gemini API 오류: {e}")
-                return "SKIP"
-    return "SKIP"
+                return "ERROR"
+    return "ERROR"   # 재시도 소진 — SKIP과 구분해 캐시에 기록하지 않음
 
 
 # ─────────────────────────────────────────────
@@ -226,7 +245,7 @@ def fetch_bokjiro_api() -> list[dict]:
             "serviceKey": DATA_GO_KR_KEY,
             "callTp":     "L",
             "pageNo":     "1",
-            "numOfRows":  "20",
+            "numOfRows":  "100",   # 노인 카테고리 전체(총 34건)를 한 번에 수신
             "srchKeyCode": "003",
             "searchWrd":  "노인",
         }
@@ -257,7 +276,9 @@ def fetch_bokjiro_api() -> list[dict]:
             })
 
     except Exception as e:
-        logger.error(f"❌ 복지로 API 오류: {e}")
+        # 예외 메시지에 요청 URL(serviceKey 포함)이 들어가므로 키를 마스킹
+        err = str(e).replace(DATA_GO_KR_KEY, "***") if DATA_GO_KR_KEY else str(e)
+        logger.error(f"❌ 복지로 API 오류: {err}")
 
     return articles
 
@@ -319,45 +340,13 @@ def scrape_seongdong_jobs() -> list[dict]:
 # Track A-3: 성동구 어르신 일자리
 # ─────────────────────────────────────────────
 def scrape_sdsenior() -> list[dict]:
-    base_url = "https://www.sdsenior.or.kr/"
-    articles = []
-
-    try:
-        res  = requests.get(base_url, headers=HEADERS, timeout=15)
-        res.raise_for_status()
-        soup = BeautifulSoup(res.text, "lxml")
-
-        rows = soup.select(
-            "ul.notice_list li, div.board_list tbody tr, "
-            "section.job_list article, table tbody tr"
-        )
-        logger.info(f"👴 성동구 어르신 일자리: {len(rows)}개 항목 발견")
-
-        for row in rows[:15]:
-            try:
-                link_tag = row.select_one("a")
-                if not link_tag:
-                    continue
-
-                title = link_tag.get_text(strip=True)
-                href  = link_tag.get("href", "")
-
-                if href.startswith("/"):
-                    detail_url = "https://www.sdsenior.or.kr" + href
-                elif href.startswith("http"):
-                    detail_url = href
-                else:
-                    continue
-
-                if title and len(title) > 2:
-                    articles.append({"title": title, "url": detail_url, "content": "", "source": "성동구 어르신일자리"})
-            except Exception as e:
-                logger.warning(f"⚠️ sdsenior 행 파싱 오류: {e}")
-
-    except Exception as e:
-        logger.error(f"❌ 성동구 어르신 일자리 스크래핑 오류: {e}")
-
-    return articles
+    # 사이트 개편(2026)으로 메인 페이지에 게시글 링크 없음 → 공지사항 게시판 직접 조회.
+    # 마포노인복지관과 동일한 data-wr-id 클릭형 게시판 솔루션.
+    # 주의: Cloud Functions(구글 IP)에서는 403 차단됨 → 파이프라인 목록에서 제외 상태.
+    return _scrape_wr_id_board(
+        "https://www.sdsenior.or.kr/bbs/board.php?bo_table=SDS_1010&me_code=1010",
+        "성동구 어르신일자리", "SDS_1010", "https://www.sdsenior.or.kr", "1010"
+    )
 
 
 # ─────────────────────────────────────────────
@@ -929,9 +918,11 @@ def scrape_shinnae_welfare() -> list[dict]:
 # URL: http://senior21.or.kr/bbs/board.php?bo_table=notice
 # 확인: G5 BBS 표준 구조
 # ─────────────────────────────────────────────
-def scrape_mapo_welfare() -> list[dict]:
-    # data-wr-id 속성으로 URL 조합하는 커스텀 구조
-    url      = "https://senior21.or.kr/bbs/board.php?bo_table=MPB_2010&lang=ko&me_code=2010"
+def _scrape_wr_id_board(url: str, label: str, bo_table: str, base_domain: str, me_code: str, limit: int = 15) -> list[dict]:
+    """<tr class="list-row-clickable" data-wr-id="..."> 구조 게시판 스크래핑.
+
+    행에 <a> 링크가 없고 클릭 시 JS로 이동하므로 data-wr-id로 상세 URL을 조합.
+    제목 셀 위치가 사이트마다 달라(마포 2번째, 성동 3번째) 가장 긴 텍스트 셀을 제목으로 사용."""
     articles = []
     try:
         res = requests.get(url, headers=HEADERS, timeout=15)
@@ -939,27 +930,33 @@ def scrape_mapo_welfare() -> list[dict]:
         soup = BeautifulSoup(res.text, "lxml")
 
         rows = soup.select("tbody tr.list-row-clickable[data-wr-id]")
-        logger.info(f"마포노인복지관: {len(rows)}개 행 발견")
+        logger.info(f"{label}: {len(rows)}개 행 발견")
 
-        for row in rows[:15]:
+        for row in rows[:limit]:
             try:
                 wr_id = row.get("data-wr-id", "").strip()
                 if not wr_id:
                     continue
-                # 제목: 두 번째 td 또는 .card-subject
-                title_tag = row.select_one("td:nth-child(2), .card-subject")
-                if not title_tag:
+                cells = [td.get_text(" ", strip=True) for td in row.select("td")]
+                title = max(cells, key=len) if cells else ""
+                if not title or len(title) < 3:
                     continue
-                title = title_tag.get_text(strip=True)
-                if not title:
-                    continue
-                detail_url = f"https://senior21.or.kr/bbs/board.php?bo_table=MPB_2010&wr_id={wr_id}&lang=ko&me_code=2010"
-                articles.append({"title": title, "url": detail_url, "content": "", "source": "마포노인복지관"})
+                detail_url = f"{base_domain}/bbs/board.php?bo_table={bo_table}&wr_id={wr_id}&me_code={me_code}"
+                articles.append({"title": title, "url": detail_url, "content": "", "source": label})
             except Exception as e:
-                logger.warning(f"⚠️ 마포노인복지관 행 파싱 오류: {e}")
+                logger.warning(f"⚠️ {label} 행 파싱 오류: {e}")
     except Exception as e:
-        logger.error(f"❌ 마포노인복지관 스크래핑 오류: {e}")
+        logger.error(f"❌ {label} 스크래핑 오류: {e}")
     return articles
+
+
+def scrape_mapo_welfare() -> list[dict]:
+    # 2026-09-03 기준 senior21.or.kr 이 모든 요청을 "Access Denied (Bot Detection)" 403으로 차단.
+    # 브라우저 UA로도 동일 → 파이프라인에서 제외. 차단 해제 시 scrapers 목록에 복원.
+    return _scrape_wr_id_board(
+        "https://senior21.or.kr/bbs/board.php?bo_table=MPB_2010&lang=ko&me_code=2010",
+        "마포노인복지관", "MPB_2010", "https://senior21.or.kr", "2010"
+    )
 
 
 # ─────────────────────────────────────────────
@@ -1151,7 +1148,7 @@ def run_scraping_pipeline(request=None):
     scrapers = [
         fetch_bokjiro_api,
         scrape_seongdong_jobs,
-        scrape_sdsenior,
+        # scrape_sdsenior       — 구글 IP 403 차단 (한국 IP는 정상, 2026-09 확인). 파서는 수정 완료
         scrape_gangbuk_jobs,
         scrape_gangbuk_press,
         scrape_gangbuk_media,
@@ -1170,7 +1167,7 @@ def run_scraping_pipeline(request=None):
         scrape_yangcheon,        # 양천 ✅ (2026-05-06 추가, doBbsFView + wdigm_title)
         # 노인복지관 (접속 가능한 8개)
         scrape_surak_welfare,    # 노원 수락 ✅
-        scrape_mapo_welfare,     # 마포 ✅
+        # scrape_mapo_welfare   — 봇 차단(403 Bot Detection, 2026-09 확인)
         scrape_dobong_welfare,   # 도봉 ✅
         scrape_eunpyeong_welfare, # 은평 ✅
         scrape_jongno_welfare,   # 종로 ✅ (2026-04-09 추가, SSL 만료로 verify=False)
@@ -1198,6 +1195,7 @@ def run_scraping_pipeline(request=None):
 
     saved_count   = 0
     skipped_count = 0
+    bokjiro_saved = 0   # 이번 실행에서 저장한 복지로 건수
 
     for article in all_articles:
         title   = article.get("title",   "").strip()
@@ -1215,6 +1213,11 @@ def run_scraping_pipeline(request=None):
 
         # 복지로는 이미 노인 카테고리(srchKeyCode=003)로 필터됨 → Gemini 스킵
         if source == "복지로":
+            # 신규가 한꺼번에 많으면(예: numOfRows 확대 직후 13건) 알림이 폭주하므로
+            # 실행당 상한을 두고 나머지는 다음 실행으로 넘김
+            if bokjiro_saved >= BOKJIRO_MAX_NEW_PER_RUN:
+                continue
+            bokjiro_saved += 1
             ai_summary = f"📢 {title[:28]}"
             logger.info(f"📋 복지로 직접 저장: {ai_summary}")
         else:
@@ -1231,12 +1234,21 @@ def run_scraping_pipeline(request=None):
                 skipped_count += 1
                 continue
 
+            # 이전 실행에서 이미 SKIP 판정된 공고는 Gemini 재호출 없이 건너뜀
+            if is_skipped(url):
+                skipped_count += 1
+                continue
+
             # 본문이 없으면 상세 페이지에서 가져옴
             if not content:
                 content = fetch_detail_content(url, source)
             ai_summary = summarize_with_gemini(title, content, source)
+            if ai_summary.strip().upper() == "ERROR":
+                logger.warning(f"⚠️ Gemini 실패로 보류(다음 실행 재시도): {title[:30]}")
+                continue
             if ai_summary.strip().upper() == "SKIP":
                 logger.info(f"🚫 AI 필터링: {title[:30]}")
+                mark_skipped(title, source, url)
                 continue
 
         save_to_firestore(title, ai_summary, source, url)

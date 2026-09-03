@@ -13,7 +13,8 @@ from dotenv import load_dotenv
 # 로컬 실행 시 .env 로드
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), '..', '.env'))
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+from log_config import configure_logging
+configure_logging()
 logger = logging.getLogger(__name__)
 
 # Firebase Admin 초기화 (이미 초기화된 경우 재사용)

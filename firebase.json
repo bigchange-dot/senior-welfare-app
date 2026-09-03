@@ -1,7 +1,15 @@
 {
   "functions": {
     "source": "backend",
-    "runtime": "python311"
+    "runtime": "python311",
+    "ignore": [
+      "venv",
+      "__pycache__",
+      "*.pyc",
+      ".env.yaml",
+      ".omc",
+      "*.log"
+    ]
   },
   "firestore": {
     "rules": "firestore.rules",

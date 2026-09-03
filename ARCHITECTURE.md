@@ -81,6 +81,12 @@
 | `timestamp` | Timestamp | 공고 등록 시각 |
 | `is_notified` | Boolean | FCM 발송 완료 여부 |
 
+**컬렉션:** `skipped_notices` (2026-09-03 추가, 백엔드 전용)
+
+Gemini가 SKIP 판정한 공고의 URL 캐시. 문서 ID는 `welfare_notices`와 동일한 URL 해시.
+매 실행마다 같은 공고(직원 채용·합격자 명단 등)를 Gemini에 재전송하던 낭비를 제거.
+필드: `title`, `source`, `url`, `timestamp`. Gemini 호출 자체가 실패한 건(`ERROR`)은 기록하지 않고 다음 실행에 재시도.
+
 ### 3.2 Track A — 스크래핑 함수 (`scraping_function.py`)
 
 **역할:** Cloud Scheduler → HTTP 트리거 → 각 사이트 크롤링 → AI 요약 → Firestore 저장
@@ -100,6 +106,19 @@ client.models.generate_content(
 ```
 
 **중복 방지:** Firestore에 동일 URL 존재 여부 확인 후 신규 건만 저장
+
+**복지로 신규 상한:** `BOKJIRO_MAX_NEW_PER_RUN = 2` — 복지로는 Gemini 없이 직접 저장되므로
+신규가 한꺼번에 생기면 FCM 알림이 폭주함. 실행당 2건까지만 저장하고 나머지는 다음 실행으로 이월.
+
+**로깅 (`log_config.py`, 2026-09-03):** Functions 런타임이 루트 로거를 WARNING으로 잡아
+`logger.info()`가 Cloud Logging에 올라가지 않던 문제 해결. Cloud Run 환경(`K_SERVICE`)에서는
+stdout에 `{"severity","message"}` JSON 한 줄로 출력해 severity 필터가 동작하고, 로컬은 평문.
+복지로 API 오류 메시지의 `serviceKey`는 `***`로 마스킹.
+
+**접속 불가 출처 (2026-09-03 기준):**
+- 마포노인복지관(senior21.or.kr): 봇 차단 403 → 스크래퍼 목록에서 제외
+- 중랑구청: Cloud Functions(구글 IP)에서 연결 타임아웃, 한국 IP에서는 정상 → 해외 IP 차단으로 추정, 코드로 해결 불가
+- 성동노인종합복지관(sdsenior.or.kr): 파서는 재작성했으나 구글 IP에서 403 차단 → 목록에서 제외. 한국 IP 프록시 등 인프라 대안 필요
 
 **Lazy 초기화 패턴 (배포 타임아웃 방지):**
 ```python

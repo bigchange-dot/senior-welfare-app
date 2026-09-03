@@ -45,7 +45,8 @@ Claude Code가 이 프로젝트에서 작업할 때 반드시 따르는 규칙�
 - `home_screen.dart`: `kIsWeb`일 때만 Mock 데이터, 디바이스는 Firestore 실데이터
 - AdMob Interstitial은 `webview_screen.dart`에 완전 구현됨
 - Kotlin 증분 컴파일 오류 발생 시 → `flutter clean` 후 재빌드
-- ADB 경로: `C:/Users/chae/AppData/Local/Android/Sdk/platform-tools`
+- ADB 경로 (Mac): `~/Library/Android/sdk/platform-tools` (구 Windows: `C:/Users/chae/AppData/Local/Android/Sdk/platform-tools`)
+- Mac 개발환경: Homebrew 설치 (Flutter, openjdk@17, python@3.11, firebase-cli, gcloud), 환경변수는 `~/.zprofile`
 
 ---
 
