@@ -58,11 +58,31 @@ Claude Code가 이 프로젝트에서 작업할 때 반드시 따르는 규칙�
 
 ---
 
-## Gemini API
+## AI 판정 (`backend/llm_judge.py`)
 
-- 모델: `gemini-3.1-flash-lite-preview`
-- 호출 후 `time.sleep(13)` 필수 (무료 티어 분당 5회 제한)
-- 429 발생 시 1차 65초, 2차 130초 대기 후 재시도 (최대 3회)
+- `LLM_PROVIDER`로 선택: `ollama`(맥 로컬, 기본 모델 `qwen2.5:14b`) / `gemini`(기본값, 클라우드)
+- 판정 정책·규칙 필터·요약 검사는 ARCHITECTURE.md 3.2. 규칙·프롬프트를 바꾸면 과거 판정으로 재평가할 것
+- Gemini: 모델 `gemini-3.1-flash-lite-preview`, 호출 후 `time.sleep(13)` (분당 5회 제한), 429는 65초·130초 대기 후 재시도.
+  **2026-10-23부터 선불 크레딧 소진(402)** — 지금은 쓰지 않음. 다시 쓰려면 AI Studio에서 충전
+
+---
+
+## 로컬 수집 실행 (2026-11-16~, 클라우드 수집 대신)
+
+- 수집 파이프라인은 이 맥에서 launchd로 매일 09:00·18:00 실행. 알림 함수·헬스체크는 그대로 클라우드
+- launchd 원본: `launchd/com.seniorwelfare.pipeline.plist` → `~/Library/LaunchAgents/com.seniorwelfare.pipeline.plist`(심볼릭 링크)
+  - plist를 고치면 `launchctl unload` 후 `load` 다시
+- 로그: `logs/pipeline.log` (git 제외)
+- 맥(MacBook)이 잠자기면 그 시각엔 안 돌고 깨어날 때 한 번 실행, 꺼져 있으면 건너뜀. 그래서 **09:00 회차는 매일 09:01 자동 깨우기로 보장**,
+  18:00 회차는 맥이 켜져 있을 때만 돈다 (사용자 결정 2026-11-16)
+  - 깨우기 예약 (시스템 설정, 프로젝트 밖): `sudo pmset repeat wakeorpoweron MTWRFSU 09:01:00` — 확인 `pmset -g sched`, 해제 `sudo pmset repeat cancel`
+  - FileVault가 켜져 있고 자동 로그인이 꺼져 있어 재시동 후에는 로그인해야 수집이 시작됨
+- Firestore 인증: gcloud ADC (`~/.config/gcloud/application_default_credentials.json`, 할당량 프로젝트 `senior-welfare-app`).
+  만료되면 **터미널 앱에서** `gcloud auth application-default login` (Claude Code `!`로는 브라우저가 안 열림)
+- 수동 실행: `cd backend && LLM_PROVIDER=ollama GOOGLE_CLOUD_PROJECT=senior-welfare-app venv/bin/python scraping_function.py`
+  - 밀린 공고를 알림 없이 저장하려면 `SILENT_SAVE=1` 추가
+- Cloud Scheduler `scraping-morning`·`scraping-evening`은 일시정지 상태. 클라우드로 되돌리려면 `gcloud scheduler jobs resume <이름> --location=asia-northeast3` (Gemini 충전 필요)
+- 실패 감시: 클라우드 `health_check_function`(10:00·19:00)이 실행 기록을 보고 메일 알림 (ARCHITECTURE.md 3.5). 맥이 꺼져 있어 수집을 못 하면 "N시간째 실행되지 않음" 메일이 옴
 
 ---
 

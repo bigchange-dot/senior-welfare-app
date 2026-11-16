@@ -1,0 +1,124 @@
+# 경기도 31개 시·군 고시공고 수집 설정 초안 (2026-11-16 조사, 같은 날 probe_eminwon.py로 점검)
+#
+# 핵심: 대부분의 시·군이 행정안전부 표준 '새올행정시스템'의 고시공고를 쓴다.
+#   → 시·군마다 스크래퍼를 만들지 않고, 새올(eminwon) 파서 1개 + 도메인 목록으로 처리.
+#   → 일반구(수원 장안구, 고양 덕양구, 화성 만세구 등)·읍면동 공고도 같은 목록에 섞여 올라오므로
+#     구청을 따로 수집할 필요 없음. 고시공고번호 접두어("수원시 팔달구 공고 …")로 하위 지역 분류.
+#
+# 점검 결과 (2026-11-16): 31곳 중 30곳 새올 직접 접근 OK, 시흥 1곳만 홈페이지 목록 폴백.
+#   봇 차단(403·캡차)은 없음 → 제외할 곳 없음.
+#
+# eminwon:
+#   confirmed  = 새올 목록 페이지에서 공고 10건 확인 (2026-11-16 probe)
+#   none       = 새올 직접 접근 불가 → homepage_list로 폴백
+# eminwon_base: 새올 주소가 기본값(defaults.eminwon_base)과 다를 때만 적는다
+# tls: 서버 보안 연결 설정 문제. 아래 tls 항목 참고 (인증서 검증은 끄지 않는다)
+#   legacy = 옛 암호화 방식만 지원 → 해당 도메인에만 tls.legacy_ciphers 적용
+#   chain  = 서버가 중간 인증서를 안 보냄 → tls.intermediate_certs를 루트 인증서에 더해 검증
+# family (홈페이지 목록 페이지 구조, eminwon 직접 접근이 안 될 때 폴백용):
+#   saeol_portal   /portal/saeol/gosi/list.do 류 (같은 템플릿)
+#   select_eminwon selectEminwon*.do 류
+#   select_gosi    selectGosi*.do 류
+#   custom         개별 구조
+#
+# 새올 목록 페이지 구조 (파서 작성용, 2026-11-16 확인):
+#   - 모든 행에 searchDetail('공고관리번호')가 있다. 위치는 a href / a onclick / td onclick 중 하나.
+#   - tbody 유무, 칸 수(5~11개)는 시·군마다 다르다 → 행은 searchDetail로 찾고, 칸은 머리글(th) 이름으로 매핑.
+#   - 용인시도 기본 목록 URL(OfrAction.do)로 된다. JSP 목록(/emwp/jsp/ofr/OfrNotAncmtL.jsp)은 모든 곳에서 0건.
+#
+# 새올 공고구분 코드(not_ancmt_se_code): 01 고시, 02 입찰, 04 일반공고, 05 채용
+#   → 04(일반공고) + 05(채용)만 수집. 01·02는 도시계획·입찰이라 어르신 관련이 거의 없음.
+
+defaults:
+  se_codes: ["04", "05"]
+  page_size: 30
+  schedule: ["09:00", "18:00"]
+  eminwon_base: "https://eminwon.{domain}"
+
+# 보안 연결 예외 (2026-11-16 점검)
+tls:
+  # 성남·이천·구리: AES128-SHA 등 RSA 키교환 방식만 지원. Python 기본 설정으로는 handshake 실패
+  legacy_ciphers: "DEFAULT:@SECLEVEL=1"
+  # 남양주·의정부: 중간 인증서 누락. 인증서의 AIA(CA Issuers) 주소에서 받은 것
+  # 백엔드는 backend/certs/intermediates.pem(PEM 변환본)을 쓴다 (tls_compat.py). 이 목록은 probe_eminwon.py용
+  intermediate_certs:
+    - http://crt.sectigo.com/SectigoPublicServerAuthenticationCADVR36.crt        # 남양주 (만료 2036-03-21)
+    - http://crt.sectigo.com/SectigoRSAOrganizationValidationSecureServerCA.crt  # 의정부 (만료 2030-12-31)
+
+cities:
+  # ── 특례시·대도시 (일반구 있음) ──
+  - {name: 수원시, domain: suwon.go.kr, eminwon: confirmed, family: custom,
+     homepage_list: "https://www.suwon.go.kr/web/saeallOfr/BD_ofrList.do",
+     sub_districts: [장안구, 권선구, 팔달구, 영통구]}
+  - {name: 성남시, domain: seongnam.go.kr, eminwon: confirmed, family: custom, tls: legacy,
+     sub_districts: [수정구, 중원구, 분당구]}
+  - {name: 고양시, domain: goyang.go.kr, eminwon: confirmed, family: custom,
+     homepage_list: "https://www.goyang.go.kr/www/user/bbs/BD_selectBbsList.do?q_bbsCode=1082",  # 채용공고
+     sub_districts: [덕양구, 일산동구, 일산서구]}
+  - {name: 용인시, domain: yongin.go.kr, eminwon: confirmed, family: custom,
+     sub_districts: [처인구, 기흥구, 수지구]}
+  - {name: 화성시, domain: hscity.go.kr, eminwon: confirmed, family: custom,
+     homepage_list: "https://www.hscity.go.kr/www/gosi/BD_employment.do",  # 채용공고
+     sub_districts: [만세구, 효행구, 병점구, 동탄구]}
+  - {name: 부천시, domain: bucheon.go.kr, eminwon: confirmed, family: custom,
+     homepage_list: "https://www.bucheon.go.kr/site/program/board/basicboard/list?boardtypeid=26756&menuid=148002004001",  # 채용
+     sub_districts: [원미구, 소사구, 오정구]}
+  - {name: 안산시, domain: ansan.go.kr, eminwon: confirmed, family: custom,
+     homepage_list: "https://www.ansan.go.kr/www/common/bbs/selectPageListBbs.do?bbs_code=WWW13",
+     sub_districts: [상록구, 단원구]}
+  - {name: 안양시, domain: anyang.go.kr, eminwon: confirmed, family: select_eminwon,
+     homepage_list: "https://www.anyang.go.kr/main/selectEminwonList.do?key=263&notAncmtSeCode=01,04&ofr_pageSize=10",
+     homepage_jobs: "https://www.anyang.go.kr/main/sub.do?key=4102",
+     sub_districts: [만안구, 동안구]}
+
+  # ── 시 ──
+  - {name: 남양주시, domain: nyj.go.kr, eminwon: confirmed, family: select_eminwon, tls: chain,
+     homepage_list: "https://www.nyj.go.kr/www/selectEminwonWebList.do?key=2492&sa1=01&sa1=02&sa1=04&sa1=05"}
+  - {name: 평택시, domain: pyeongtaek.go.kr, eminwon: confirmed, family: saeol_portal,
+     note: "홈페이지 경로는 /pyeongtaek/saeol/gosi/"}
+  - {name: 의정부시, domain: ui4u.go.kr, eminwon: confirmed, family: saeol_portal, tls: chain,
+     homepage_list: "https://www.ui4u.go.kr/portal/saeol/gosiList.do?seCode=01&mId=0301040000"}
+  - {name: 시흥시, domain: siheung.go.kr, eminwon: none, family: saeol_portal,
+     homepage_list: "https://www.siheung.go.kr/main/saeol/gosi/list.do?mId=0401040100",
+     note: "eminwon.siheung.go.kr에 새올 경로 없음(404). 홈페이지 목록은 정상 (첫 페이지 공고번호 행 9개, 상세 링크는 href='#')"}
+  - {name: 파주시, domain: paju.go.kr, eminwon: confirmed, family: custom,
+     note: "홈페이지는 BD_board bbsCd=1022"}
+  - {name: 김포시, domain: gimpo.go.kr, eminwon: confirmed, family: custom,
+     homepage_list: "https://www.gimpo.go.kr/portal/ntfcPblancList.do?key=1004&cate_cd=1",
+     note: "고시·일반·채용 통합 목록, RSS 제공 표시 있음"}
+  - {name: 광명시, domain: gm.go.kr, eminwon: confirmed, family: custom,
+     homepage_list: "https://www.gm.go.kr/pt/user/nftcBbs/BD_selectNftcBbsList.do?q_nftcBbsCode=1001"}
+  - {name: 광주시, domain: gjcity.go.kr, eminwon: confirmed, family: saeol_portal,
+     homepage_list: "https://www.gjcity.go.kr/portal/saeol/gosi/list.do?mId=0202010000"}
+  - {name: 군포시, domain: gunpo.go.kr, eminwon: confirmed, family: select_eminwon,
+     homepage_jobs: "https://www.gunpo.go.kr/www/selectEminwonNoticeList.do?key=3899&Not_ancmt_se_code=05&list_gubun=N&ofr_pageSize=10&notAncmtSeCd=05"}
+  - {name: 하남시, domain: hanam.go.kr, eminwon: confirmed, family: select_gosi,
+     homepage_list: "https://www.hanam.go.kr/www/selectGosiList.do?key=171&not_ancmt_se_code=01%2C04"}
+  - {name: 오산시, domain: osan.go.kr, eminwon: confirmed, family: saeol_portal,
+     eminwon_base: "http://eminwon.osan.go.kr", note: "https는 400 Bad Request, http만 정상"}
+  - {name: 이천시, domain: icheon.go.kr, eminwon: confirmed, family: saeol_portal, tls: legacy,
+     homepage_list: "https://www.icheon.go.kr/portal/saeol/gosi/list.do?seCode=04&mid=0402020000"}
+  - {name: 안성시, domain: anseong.go.kr, eminwon: confirmed, family: custom}
+  - {name: 의왕시, domain: uiwang.go.kr, eminwon: confirmed, family: custom}
+  - {name: 양주시, domain: yangju.go.kr, eminwon: confirmed, family: select_eminwon}
+  - {name: 구리시, domain: guri.go.kr, eminwon: confirmed, family: custom, tls: legacy}
+  - {name: 포천시, domain: pocheon.go.kr, eminwon: confirmed, family: select_eminwon,
+     eminwon_base: "https://eminwon.pcs21.net",
+     note: "eminwon.pocheon.go.kr은 https 연결 끊김, http는 eminwon.pcs21.net 오류 페이지로 이동"}
+  - {name: 여주시, domain: yeoju.go.kr, eminwon: confirmed, family: unknown}
+  - {name: 동두천시, domain: ddc.go.kr, eminwon: confirmed, family: select_gosi}
+  - {name: 과천시, domain: gccity.go.kr, eminwon: confirmed, family: saeol_portal}
+
+  # ── 군 ──
+  - {name: 가평군, domain: gp.go.kr, eminwon: confirmed, family: select_gosi}
+  - {name: 양평군, domain: yp21.go.kr, eminwon: confirmed, family: unknown}
+  - {name: 연천군, domain: yeoncheon.go.kr, eminwon: confirmed, family: select_gosi,
+     homepage_list: "https://yeoncheon.go.kr/www/selectGosiList.do?key=3393&not_ancmt_se_code=01"}
+
+# 1차 필터 (Gemini 호출 전, 규칙 기반) — 고시공고는 공시송달·도로점용이 대부분이라 필수
+filter:
+  include_title_keywords: [노인, 어르신, 경로, 실버, 시니어, 고령, 65세, 요양, 돌봄, 치매,
+                           기초연금, 복지관, 경로당, 공공근로, 노인일자리, 사회활동 지원사업]
+  include_departments: [노인, 경로, 장애인, 복지, 돌봄, 일자리, 고용노동]   # 담당부서명 부분일치 시 통과 후보
+  exclude_title_keywords: [공시송달, 도로점용, 굴착, 주민등록, 과태료, 지적, 도로명주소,
+                           하천점용, 건설업, 담배소매, 수용재결, 무단방치, 입찰, 견적]

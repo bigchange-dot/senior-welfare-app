@@ -24,15 +24,15 @@
 ### 전체 흐름
 
 ```
-[Cloud Scheduler]
-  09:00 / 18:00 KST
+[맥 launchd] 09:00 / 18:00 KST  (2026-11-16~, 클라우드 Cloud Scheduler 수집은 일시정지)
+  backend/scraping_function.py 직접 실행, AI는 로컬 Ollama
        │
        ▼
-[Track A: scraping_function]
+[Track A: 수집 파이프라인]
   성동구청 · 강북구청 웹 크롤링
   복지로 공공 API 호출
        │
-       ▼ Gemini 2.5 Flash AI 요약
+       ▼ AI 판정·요약 (llm_judge.py: 규칙 필터 → Ollama/Gemini)
        │
        ▼
 [Firestore: welfare_notices 컬렉션]
@@ -47,6 +47,11 @@
 [Flutter 앱 — Android / iOS]
   FCM 수신 → 푸시 알림 표시
   딥링크 → 인앱 WebView로 공고 열기
+
+[운영 감시] (2026-11-16, 3.5 참고)
+  scraping_function ─ 실행마다 ─▶ Firestore pipeline_runs / system_status
+  health_check_function (10:00 / 19:00 KST) ─ 문제 시 HEALTH_ALERT 로그
+       └▶ Cloud Monitoring 로그 알림 정책 ─▶ 이메일
 ```
 
 ### 기술 스택
@@ -55,7 +60,7 @@
 |------|------|
 | **Backend** | Firebase Cloud Functions (Python 3.11, 2nd Gen) |
 | **Database** | Cloud Firestore (`welfare_notices` 컬렉션) |
-| **AI 요약** | Google Gemini API (`gemini-3.1-flash-lite-preview`) |
+| **AI 요약** | `LLM_PROVIDER`로 선택 — 로컬 Ollama `qwen2.5:14b` / Google Gemini API `gemini-3.1-flash-lite-preview` (3.2 참고) |
 | **Push 알림** | Firebase Cloud Messaging (FCM) — Topic 방식 |
 | **스케줄러** | Cloud Scheduler (asia-northeast3) |
 | **Frontend** | Flutter 3 (iOS / Android) |
@@ -87,6 +92,21 @@ Gemini가 SKIP 판정한 공고의 URL 캐시. 문서 ID는 `welfare_notices`와
 매 실행마다 같은 공고(직원 채용·합격자 명단 등)를 Gemini에 재전송하던 낭비를 제거.
 필드: `title`, `source`, `url`, `timestamp`. Gemini 호출 자체가 실패한 건(`ERROR`)은 기록하지 않고 다음 실행에 재시도.
 
+**컬렉션:** `pipeline_runs` / `system_status` (2026-11-16 추가, 백엔드 전용 — `monitoring.py`)
+
+수집 실행 기록. `pipeline_runs/{자동 ID}`는 실행마다 1건 쌓이는 이력, `system_status/pipeline`은 마지막 실행 1건(헬스체크가 읽음).
+두 컬렉션 모두 `firestore.rules`의 기본 차단 규칙에 걸려 앱에서는 읽을 수 없다.
+
+| 필드 | 설명 |
+|------|------|
+| `started_at` / `finished_at` | 실행 시작·종료 시각 (UTC) |
+| `runner` | `cloud`(Cloud Functions) / `local`(직접 실행) |
+| `collected` / `saved` / `skipped` | 수집·저장·건너뜀 건수 |
+| `llm_calls` / `llm_errors` / `llm_error` | AI 요약 호출 수, 실패(보류) 수, 마지막 오류 메시지 |
+| `source_counts` | 스크래퍼 함수명 → 수집 건수 (`-1` = 예외로 실패) |
+| `errors` | 실행 중 ERROR 로그 요약 `[{message, count}]` (최대 20개) |
+| `fatal` | 파이프라인이 예외로 중단됐을 때 사유 (정상이면 빈 문자열) |
+
 ### 3.2 Track A — 스크래핑 함수 (`scraping_function.py`)
 
 **역할:** Cloud Scheduler → HTTP 트리거 → 각 사이트 크롤링 → AI 요약 → Firestore 저장
@@ -97,13 +117,30 @@ Gemini가 SKIP 판정한 공고의 URL 캐시. 문서 ID는 `welfare_notices`와
 - 성동구청: `requests` + `BeautifulSoup4` HTML 파싱
 - 강북구청: `requests` + `BeautifulSoup4` + SAB 봇 감지 우회
 
-**AI 요약 프롬프트 패턴:**
-```python
-client.models.generate_content(
-    model="gemini-3.1-flash-lite-preview",
-    contents=prompt,  # 노인 관련 여부 판별 + 30자 이내 속보 요약 or SKIP
-)
-```
+**AI 판정·요약 (`llm_judge.py`, 2026-11-16 개편):**
+
+판정 순서 (복지로 제외 출처): 중복 → **규칙 필터** → 키워드 필터(구청 등 일반 출처) → SKIP 캐시 → 본문 추출 → **LLM 판정**
+
+- 규칙 필터 `rule_skip_reason()`: 합격자·추첨·선정 결과, 행정 공개(업무추진비·수의계약·회의록 등), 행정 공고(공시송달·입찰 등),
+  제목에 마감 표시가 있는 글은 LLM에 묻지 않고 제외. 결과 발표라도 "추가 접수/모집"이 있으면 LLM으로 넘김.
+  (도입 이유: 같은 유형 판정이 엇갈림 — 수락 '합격자 명단' 9건 SKIP·5건 PASS, 도봉은 같은 문장 알림 15건+)
+- 정책 (2026-11-16 결정): 합격자·결과 발표 제외 / 이미 끝난 일 보도(성료·협약·수상·전달식) 제외 /
+  요약은 대상·날짜·마감 위주 정보형, 🚨·[속보]·느낌표 금지
+- 프롬프트에 오늘 날짜를 넣어 마감 지난 공고 제외. 본문은 800자까지 (기존 300자)
+- 출력은 JSON `{"decision": "PASS|SKIP", "summary": "..."}`. Ollama는 JSON 스키마 구조화 출력, Gemini는 `response_mime_type=application/json`
+- 저장 전 검사 `is_valid_summary()`: 40자 초과, 한자, 한글 4자 미만, **제목·본문에 없는 숫자**(지어낸 날짜·인원),
+  제목·본문에 없는 영문 단어 → 제목 기반 문구 `📢 제목 28자`로 대체
+- LLM 선택: 환경변수 `LLM_PROVIDER` — `gemini`(기본, 클라우드) / `ollama`(맥 로컬, `qwen2.5:14b`)
+- **기간 지남 검사** `latest_date_in()`: 요약에 적힌 마지막 날짜(`11/12`, `10월 30일`, `~30일`)가 오늘보다 앞서면 SKIP.
+  LLM이 날짜 비교를 자주 놓침 (첫 로컬 실행에서 끝난 전시회·강좌 2건 저장)
+- 호출 실패는 `"ERROR"` → 저장하지 않고 다음 실행에 재시도, 실행 기록 `llm_errors`로 집계
+
+**본문 추출 `fetch_detail_content()` (2026-11-16 수정):** 게시판 전용 영역(`div.view_content`, `div.xe_content` 등)은 그대로 쓰고,
+범용 영역(`article`, `div#content`, `<p>` 합산)은 제목과 겹치는 단어가 있을 때만 쓴다. 이전에는 강북구청 언론보도(외부 신문사 링크)에서
+다른 기사 제목들을 긁어 엉뚱한 요약이 저장됐다. 응답 헤더에 charset이 없으면 인코딩을 추정해 한글 깨짐을 막는다.
+도봉노인복지관(본문이 포스터 이미지)·은평노인복지관(본문이 스크립트로 암호화)은 본문 없이 제목으로만 판정된다.
+
+**알림 없이 저장 `SILENT_SAVE=1`:** `is_notified=True`로 저장해 알림 함수가 발송을 건너뜀. 장애 뒤 밀린 공고를 한꺼번에 처리할 때 사용.
 
 **중복 방지:** Firestore에 동일 URL 존재 여부 확인 후 신규 건만 저장
 
@@ -114,6 +151,12 @@ client.models.generate_content(
 `logger.info()`가 Cloud Logging에 올라가지 않던 문제 해결. Cloud Run 환경(`K_SERVICE`)에서는
 stdout에 `{"severity","message"}` JSON 한 줄로 출력해 severity 필터가 동작하고, 로컬은 평문.
 복지로 API 오류 메시지의 `serviceKey`는 `***`로 마스킹.
+
+**출처 현황 (2026-11-16 점검, 상세 `docs/수집기-현황-2026-11-16.md`):**
+- 중구청·성동구청 채용: SSL 중간 인증서 누락 → `tls_compat.install_ca_bundle()`이 certifi 루트 + `certs/intermediates.pem`을
+  `REQUESTS_CA_BUNDLE`로 지정해 해결 (2026-11-16). 인증서 검증은 끄지 않음
+- 은평·용산구청: 구글 IP 차단, 맥 로컬 수집으로 회복. 강북구청: 구글 IP 차단, 2026-11-16 맥에서도 0건 — 재확인 중
+- 강서·동작·관악구청: 수집은 되지만 2026-05 추가 이후 저장 0건 (어르신과 무관한 게시판)
 
 **접속 불가 출처 (2026-09-03 기준):**
 - 마포노인복지관(senior21.or.kr): 봇 차단 403 → 스크래퍼 목록에서 제외
@@ -168,7 +211,34 @@ SOURCE_TOPIC_MAP = {
 
 - 리전: `asia-northeast3` (서울)
 - HTTP Target: Cloud Functions scraping 엔드포인트
-- 상태: ENABLED
+- 상태: **PAUSED** (2026-11-16, 맥 로컬 수집으로 전환. 되돌리기: `gcloud scheduler jobs resume <이름> --location=asia-northeast3`)
+- 재시도 설정 없음(retryCount 0) — 2026-11-16 오전 인스턴스 대기 초과 500 한 번에 그 회차가 빠졌음
+
+### 3.5 운영 감시 (`monitoring.py`, 2026-11-16)
+
+**배경:** 2026-10-23부터 Gemini 선불 크레딧 소진(402)으로 25일간 신규 저장 0건이었지만, 수집 함수가 매번
+200으로 끝나 스케줄러·로그 어디에서도 실패로 드러나지 않았다.
+
+**구조:**
+1. `run_scraping_pipeline()`이 성공·실패와 관계없이 실행 기록을 남긴다 (`try/finally`). 스크래퍼별 오류는
+   루트 로거에 붙인 `ErrorCollector`가 ERROR 로그를 모아 요약한다. 기록 실패는 경고만 남기고 수집에 영향을 주지 않는다.
+2. `health_check_function`(스케줄 트리거, 매일 10:00·19:00 KST)이 `system_status/pipeline`과
+   최신 `welfare_notices.timestamp`를 읽어 판정한다. 수집을 클라우드에서 하든 로컬에서 하든 같은 기록을 보므로 감시 방식은 같다.
+3. 문제가 있으면 `HEALTH_ALERT | 문제1 / 문제2 | 참고: 0건·실패 출처 …`를 ERROR 로그로 남긴다.
+4. Cloud Monitoring 로그 알림 정책이 `health-check-function`의 ERROR 로그(헬스체크 함수 자체의 오류 포함)를 이메일로 보낸다.
+
+**알림 조건 (`find_problems`):**
+
+| 조건 | 기준 |
+|------|------|
+| 수집이 멈춤 | 마지막 실행 종료 후 16시간 초과 (정상 최대 간격 15시간) |
+| 수집 중단 | `fatal` 있음 |
+| 수집 0건 | `collected == 0` (모든 출처 실패) |
+| AI 요약 실패 | 실패 3건 이상, 또는 호출한 건이 전부 실패 (일시적 429 1~2건은 무시) |
+| 새 공고 없음 | 최신 공고가 4일 넘게 없음 (2026-03~10 평균 하루 1.8건) |
+| 기록 없음 | `system_status/pipeline` 문서 없음 (배포 직후 첫 수집 전이면 한 번 뜰 수 있음) |
+
+출처별 0건·실패는 알림 조건이 아니라 메일 본문 참고 정보로만 넣는다 (구글 IP 차단 출처가 상시 0건이라 매번 울리게 됨).
 
 ---
 
@@ -308,6 +378,12 @@ senior-welfare-app/
 │   ├── main.py                    # Cloud Functions 진입점 (트리거 등록)
 │   ├── scraping_function.py       # Track A: 크롤링 + AI 요약 + Firestore 저장
 │   ├── notification_function.py   # Track B: FCM 푸시 발송
+│   ├── llm_judge.py               # AI 판정·요약: 규칙 필터, 프롬프트, Ollama/Gemini 호출, 결과 검사 (3.2)
+│   ├── monitoring.py              # 운영 감시: 실행 기록 + 헬스체크 (3.5)
+│   ├── log_config.py              # Cloud Logging용 JSON 로그 설정
+│   ├── tls_compat.py              # 중간 인증서 누락·옛 암호화 사이트 대응 (검증은 유지)
+│   ├── certs/intermediates.pem    # 서버가 안 보내는 중간 인증서 3개 (tls_compat.py가 사용)
+│   ├── eminwon.py                 # 새올 고시공고 공통 파서 (경기용, 파이프라인 미연결 — dry-run만)
 │   ├── requirements.txt           # Python 패키지
 │   └── .env.yaml                  # 환경변수 (gitignore — API 키)
 │
@@ -328,6 +404,9 @@ senior-welfare-app/
 │   │       └── fcm_service.dart     # FCM 초기화, 토픽 구독 관리
 │   └── pubspec.yaml
 │
+├── docs/                          # 작업 인계, 경기도 확장 조사 (gyeonggi/)
+├── launchd/                       # 맥 로컬 수집 launchd plist 원본 (~/Library/LaunchAgents에 링크)
+├── logs/                          # 로컬 수집 로그 (git 제외)
 ├── setup-cloud-scheduler.sh       # Cloud Scheduler gcloud CLI 등록 스크립트
 ├── .env                           # 로컬 환경변수 (gitignore)
 ├── .gitignore
@@ -342,8 +421,11 @@ senior-welfare-app/
 |------|------|------|
 | Cloud Functions: `scraping_function` | ✅ 배포 완료 | asia-northeast3 |
 | Cloud Functions: `notification_function` | ✅ 배포 완료 | asia-northeast3 |
-| Cloud Scheduler: `scraping-morning` (09:00 KST) | ✅ ENABLED | Asia/Seoul |
-| Cloud Scheduler: `scraping-evening` (18:00 KST) | ✅ ENABLED | Asia/Seoul |
+| Cloud Functions: `health_check_function` | ✅ 배포 완료 (2026-11-16) | 10:00·19:00 KST 스케줄 |
+| Cloud Monitoring 알림 정책 (HEALTH_ALERT → 이메일) | ✅ 설정 (2026-11-16) | 3.5 참고 |
+| 맥 로컬 수집 (launchd `com.seniorwelfare.pipeline`) | ✅ 운영 (2026-11-16~) | CLAUDE.md "로컬 수집 실행" |
+| Cloud Scheduler: `scraping-morning` (09:00 KST) | ⏸ PAUSED (2026-11-16, 맥 로컬 수집으로 전환) | Asia/Seoul |
+| Cloud Scheduler: `scraping-evening` (18:00 KST) | ⏸ PAUSED (2026-11-16) | Asia/Seoul |
 | Firestore Database | ✅ 생성 완료 | asia-northeast3 |
 | Firestore 보안 규칙 | ✅ 배포 완료 | welfare_notices 읽기 허용 |
 | Firestore 복합 인덱스 | ✅ 배포 완료 | source + timestamp |
@@ -379,5 +461,9 @@ senior-welfare-app/
 | `GEMINI_API_KEY` | `.env`, `backend/.env.yaml` | Gemini AI 요약 API |
 | `DATA_GO_KR_KEY` | `.env`, `backend/.env.yaml` | 복지로 공공 DATA API |
 | `ADMOB_INTERSTITIAL_ID` | Flutter `--dart-define` | AdMob 전면 광고 ID |
+| `LLM_PROVIDER` | 실행 환경 | `gemini`(기본) / `ollama` — AI 판정에 쓸 모델 |
+| `OLLAMA_MODEL`, `OLLAMA_URL` | 실행 환경 | 기본 `qwen2.5:14b`, `http://localhost:11434` |
+| `SILENT_SAVE` | 실행 환경 | `1`이면 알림 없이 저장 (밀린 공고 처리용) |
+| `GOOGLE_CLOUD_PROJECT` | 로컬 실행 | `senior-welfare-app` — 로컬에서 Firestore 접속 시 프로젝트 지정 |
 
 > **주의:** `.env`, `backend/.env.yaml`은 `.gitignore`에 등록되어 있음
