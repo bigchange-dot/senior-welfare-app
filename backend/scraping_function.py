@@ -26,14 +26,20 @@ from dotenv import load_dotenv
 # ─────────────────────────────────────────────
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), '..', '.env'))
 
-GEMINI_API_KEY      = os.getenv("GEMINI_API_KEY", "")
 DATA_GO_KR_KEY      = os.getenv("DATA_GO_KR_KEY", "").strip()
 FIREBASE_COLLECTION = "welfare_notices"
-SKIPPED_COLLECTION  = "skipped_notices"   # Gemini가 SKIP 판정한 URL 캐시 (재호출 방지)
+SKIPPED_COLLECTION  = "skipped_notices"   # AI가 SKIP 판정한 URL 캐시 (재호출 방지)
 BOKJIRO_MAX_NEW_PER_RUN = 2               # 복지로 신규 저장 상한 (알림 폭주 방지)
+# 1이면 알림 없이 저장 (is_notified=True로 저장 → notification_function이 건너뜀).
+# 장애 뒤 밀린 공고를 한꺼번에 처리할 때 알림 폭주를 막는 용도
+SILENT_SAVE = os.getenv("SILENT_SAVE", "") == "1"
 
 from log_config import configure_logging
+from monitoring import ErrorCollector, record_pipeline_run
+import llm_judge
+import tls_compat
 configure_logging()
+tls_compat.install_ca_bundle()   # 중간 인증서 누락 사이트(중구청·성동구청 등) 검증용 번들
 logger = logging.getLogger(__name__)
 
 # Firebase Admin 초기화 (이미 초기화된 경우 재사용)
@@ -52,10 +58,9 @@ HEADERS = {
 
 # ─────────────────────────────────────────────
 # 지연 초기화 (Lazy Init) — 배포 타임아웃 방지
-# Firestore / Gemini 클라이언트는 첫 호출 시 생성
+# Firestore 클라이언트는 첫 호출 시 생성 (Gemini 클라이언트는 llm_judge.py)
 # ─────────────────────────────────────────────
-_db            = None
-_gemini_client = None
+_db = None
 
 
 def _get_db():
@@ -63,14 +68,6 @@ def _get_db():
     if _db is None:
         _db = firestore.client()
     return _db
-
-
-def _get_gemini():
-    global _gemini_client
-    if _gemini_client is None:
-        from google import genai
-        _gemini_client = genai.Client(api_key=GEMINI_API_KEY)
-    return _gemini_client
 
 
 # ─────────────────────────────────────────────
@@ -114,17 +111,53 @@ def save_to_firestore(title: str, ai_summary: str, source: str, url: str) -> str
         "source":      source,
         "url":         url,
         "timestamp":   datetime.now(timezone.utc),
-        "is_notified": False,
+        "is_notified": SILENT_SAVE,   # True면 알림 함수가 발송을 건너뜀
     })
-    logger.info(f"✅ 저장 완료: [{source}] {ai_summary}")
+    logger.info(f"✅ 저장 완료{'(알림 없음)' if SILENT_SAVE else ''}: [{source}] {ai_summary}")
     return doc_id
 
 
 # ─────────────────────────────────────────────
-# Gemini AI 요약 (google-genai SDK)
+# 상세 페이지 본문 추출 (AI 판정 입력)
 # ─────────────────────────────────────────────
-def fetch_detail_content(url: str, source: str) -> str:
-    """상세 페이지에서 본문 텍스트 최대 300자 추출."""
+# 게시판 전용 본문 영역 — 찾으면 그대로 신뢰
+_BOARD_BODY_SELECTORS = [
+    "div.view_content", "div.bbs_content", "div.board_view",
+    "div.cont_area", "div.view_txt", "td.view_con", "div.detail_content",
+    "div.xe_content",   # XE/라이믹스 게시판 (도봉노인복지관 등)
+]
+# 범용 영역 — 다른 글 목록·메뉴가 섞일 수 있어 제목과 겹치는 단어가 있을 때만 사용
+_GENERIC_BODY_SELECTORS = ["div#articleBody", "div.article_body", "div#article_body", "article", "div#content"]
+# 본문 판단 전에 지우는 메뉴·머리말·꼬리말 영역
+_NOISE_SELECTORS = (
+    "script, style, noscript, nav, header, footer, aside, "   # form은 페이지 전체를 감싸는 사이트가 있어 제외
+    "#header, #footer, .header, .footer, .gnb, .lnb, .snb, .location, .breadcrumb, .quick, .sidebar"
+)
+_TITLE_STOPWORDS = {"공고", "안내", "모집", "알림", "참여자", "신청", "개최", "운영", "실시", "2026년", "2027년"}
+
+
+def _title_tokens(title: str) -> list[str]:
+    words = re.findall(r"[가-힣A-Za-z0-9]{2,}", title)
+    return [w for w in words if w not in _TITLE_STOPWORDS]
+
+
+def _overlaps_title(text: str, title: str) -> bool:
+    tokens = _title_tokens(title)
+    if not tokens:
+        return True
+    hits = sum(1 for t in tokens if t in text)
+    return hits >= min(2, len(tokens))
+
+
+def fetch_detail_content(url: str, source: str, title: str = "") -> str:
+    """상세 페이지에서 본문 텍스트를 최대 llm_judge.CONTENT_CHARS자 추출. 확실하지 않으면 빈 문자열.
+
+    2026-11-16 수정: 강북구청 언론보도처럼 외부 신문사로 연결되는 글에서 마지막 단계(<p> 합산)가
+    그 페이지의 다른 기사 제목들을 긁어 와 엉뚱한 요약이 저장된 사례가 있었다
+    ("강북구 신청사 기공식" → "구로구, 11개 의료기관과 퇴원환자 돌봄").
+    범용 추출은 제목과 겹치는 단어가 있을 때만 쓰고, 아니면 본문 없이(제목만으로) 판정한다.
+    """
+    limit = llm_judge.CONTENT_CHARS
     try:
         if "gangbuk" in url:
             session = _get_gangbuk_session(url)
@@ -132,23 +165,31 @@ def fetch_detail_content(url: str, source: str) -> str:
         else:
             res = requests.get(url, headers=HEADERS, timeout=10)
         res.raise_for_status()
+        # 응답 헤더에 charset이 없으면 requests가 ISO-8859-1로 읽어 한글이 깨짐 (은평노인복지관 등)
+        if "charset" not in res.headers.get("content-type", "").lower():
+            res.encoding = res.apparent_encoding or "utf-8"
         soup = BeautifulSoup(res.text, "lxml")
+        for el in soup.select(_NOISE_SELECTORS):
+            el.decompose()
 
-        # 공통 본문 셀렉터 (한국 공공기관 게시판 패턴)
-        for selector in [
-            "div.view_content", "div.bbs_content", "div.board_view",
-            "div.cont_area", "div.view_txt", "td.view_con",
-            "div.detail_content", "div#content",
-        ]:
+        for selector in _BOARD_BODY_SELECTORS:
             el = soup.select_one(selector)
             if el:
                 text = el.get_text(separator=" ", strip=True)
                 if len(text) > 50:
-                    return text[:300]
+                    return text[:limit]
 
-        # 셀렉터 실패 시 <p> 태그 합산
+        for selector in _GENERIC_BODY_SELECTORS:
+            el = soup.select_one(selector)
+            if el:
+                text = el.get_text(separator=" ", strip=True)
+                if len(text) > 50 and _overlaps_title(text, title):
+                    return text[:limit]
+
         paragraphs = " ".join(p.get_text(strip=True) for p in soup.select("p") if p.get_text(strip=True))
-        return paragraphs[:300]
+        if len(paragraphs) > 50 and _overlaps_title(paragraphs, title):
+            return paragraphs[:limit]
+        return ""
     except Exception as e:
         logger.warning(f"⚠️ 본문 fetch 실패 ({url[:40]}): {e}")
         return ""
@@ -159,76 +200,6 @@ WELFARE_CENTER_SOURCES = {
     "종로노인복지관", "약수노인복지관", "용산노인복지관", "서대문노인복지관",
     "성동구 어르신일자리",
 }
-
-
-def summarize_with_gemini(title: str, content: str = "", source: str = "") -> str:
-    """
-    노인 관련 공고인지 판별하고, 맞으면 30자 이내 속보 요약 반환.
-    관련 없으면 'SKIP' 반환.
-    복지관 출처는 어르신 대상 맥락을 명시해 SKIP 비율 완화.
-    """
-    # 노인복지관 출처일 때 판별 기준 완화 — 이미 어르신 대상 기관
-    if source in WELFARE_CENTER_SOURCES:
-        context = f"출처: {source} (노인복지관 — 모든 프로그램·서비스가 어르신 대상)\n"
-        pass_criteria = """통과(PASS): 아래 중 하나라도 해당하면 통과
-  - 어르신 참여 프로그램 모집 (교육, 문화, 여가, 취미, 운동 등)
-  - 어르신 일자리·취업 프로그램
-  - 어르신 복지서비스·지원금·수당 신청
-  - 어르신 건강·의료·돌봄 서비스"""
-        skip_criteria = """스킵(SKIP): 아래에 해당하면 SKIP
-  - 직원·강사·요양보호사 등 종사자 채용 공고
-  - 업무추진비·계약 등 행정·회계 공개 공고
-  - 시설 공사·점검 안내"""
-    else:
-        context = ""
-        pass_criteria = """통과(PASS): 노인·어르신(60세 이상) 본인이 직접 혜택받는 공고
-  - 노인 대상 지원금, 수당, 서비스 신청
-  - 노인 일자리·취업 프로그램 참여자 모집
-  - 노인 의료·요양·돌봄 서비스"""
-        skip_criteria = """스킵(SKIP): 아래 중 하나라도 해당하면 반드시 SKIP
-  - 노인 관련 업무 직원·강사·지도사·요양사·봉사자 채용 (예: "시니어 지도사 모집", "요양보호사 채용")
-  - 노인과 무관한 일반 구정 소식, 시설 공사, 행정 공고
-  - 제목과 본문에 노인·어르신·시니어·고령·경로 관련 내용이 전혀 없는 경우"""
-
-    prompt = f"""당신은 노인 복지 공고 필터링 전문가입니다. 아래 공고를 분석하세요.
-
-{context}제목: {title}
-본문: {content[:300] if content else '(없음)'}
-
-【판별 기준】
-{pass_criteria}
-
-{skip_criteria}
-
-【출력 규칙】
-- PASS이면: 이모지 포함 30자 이내 속보 제목 출력 (제목·본문에 있는 사실만 사용, 없는 단어 추가 금지)
-- SKIP이면: 정확히 'SKIP' 만 출력
-- 설명, 이유, 부가 문장 절대 추가 금지"""
-
-    for attempt in range(3):
-        try:
-            client   = _get_gemini()
-            response = client.models.generate_content(
-                model="gemini-3.1-flash-lite-preview",
-                contents=prompt,
-            )
-            result = response.text.strip()
-            # Gemini가 간혹 "PASS: ..." 또는 "PASS ..." 형태로 응답하는 경우 접두어 제거
-            if result.upper().startswith("PASS"):
-                result = result[4:].lstrip(":").strip()
-            logger.info(f"🤖 Gemini 결과: {result[:50]}")
-            time.sleep(13)  # 무료 티어 분당 5회 제한 준수
-            return result
-        except Exception as e:
-            err_str = str(e)
-            if "429" in err_str and attempt < 2:
-                wait = 65 if attempt == 0 else 130
-                logger.warning(f"⏳ Gemini 429 Rate Limit, {wait}초 대기 후 재시도...")
-                time.sleep(wait)
-            else:
-                logger.error(f"❌ Gemini API 오류: {e}")
-                return "ERROR"
-    return "ERROR"   # 재시도 소진 — SKIP과 구분해 캐시에 기록하지 않음
 
 
 # ─────────────────────────────────────────────
@@ -1143,6 +1114,36 @@ def scrape_eunpyeong_welfare() -> list[dict]:
 # 메인 파이프라인
 # ─────────────────────────────────────────────
 def run_scraping_pipeline(request=None):
+    """수집 파이프라인을 실행하고, 성공·실패와 관계없이 실행 기록을 남긴다 (monitoring.py 참고)."""
+    stats = {
+        "started_at":    datetime.now(timezone.utc),
+        "collected":     0,
+        "saved":         0,
+        "skipped":       0,
+        "llm_calls":     0,
+        "llm_errors":    0,   # AI 요약 실패로 보류한 건수 (다음 실행에 재시도)
+        "llm_error":     "",
+        "source_counts": {},  # 스크래퍼 함수명 → 수집 건수 (-1 = 예외로 실패)
+        "fatal":         "",
+    }
+    llm_judge.state["last_error"] = ""
+    collector = ErrorCollector()
+    root_logger = logging.getLogger()
+    root_logger.addHandler(collector)
+    try:
+        return _run_pipeline(stats)
+    except Exception as e:
+        stats["fatal"] = f"{type(e).__name__}: {e}"
+        raise
+    finally:
+        root_logger.removeHandler(collector)
+        stats["finished_at"] = datetime.now(timezone.utc)
+        stats["llm_error"]   = llm_judge.state["last_error"]
+        stats["errors"]      = collector.summary()
+        record_pipeline_run(_get_db, stats)
+
+
+def _run_pipeline(stats: dict) -> str:
     logger.info("🚀 스크래핑 파이프라인 시작")
 
     scrapers = [
@@ -1188,10 +1189,13 @@ def run_scraping_pipeline(request=None):
                 result = future.result()
                 logger.info(f"  ↳ {fn_name}: {len(result)}건 수집")
                 all_articles.extend(result)
+                stats["source_counts"][fn_name] = len(result)
             except Exception as e:
                 logger.error(f"  ↳ {fn_name} 실패: {e}")
+                stats["source_counts"][fn_name] = -1
 
     logger.info(f"📦 총 수집 건수: {len(all_articles)}")
+    stats["collected"] = len(all_articles)
 
     saved_count   = 0
     skipped_count = 0
@@ -1221,30 +1225,33 @@ def run_scraping_pipeline(request=None):
             ai_summary = f"📢 {title[:28]}"
             logger.info(f"📋 복지로 직접 저장: {ai_summary}")
         else:
+            # 규칙 필터: 합격자 발표·행정 공개 등 정책상 제외 유형은 AI에 묻지 않고 고정 (llm_judge.py)
+            reason = llm_judge.rule_skip_reason(title)
+            if reason:
+                logger.info(f"🚫 규칙 필터({reason}): {title[:30]}")
+                skipped_count += 1
+                continue
+
             # 키워드 프리필터: 복지관 출처는 이미 어르신 대상 기관이라 통과.
-            # 구청 등 일반 출처는 제목에 노인 관련 키워드가 없으면 Gemini 호출 생략
-            # → Gemini 무료 티어 분당 5회 제한(sleep 13초) 때문에 전체 실행 시간을
-            #   크게 줄이기 위한 최적화. 함수 timeout 초과 방지.
-            SENIOR_KEYWORDS = (
-                "노인", "어르신", "경로", "실버", "시니어", "고령", "65세",
-                "요양", "돌봄", "치매", "장사", "기초연금", "복지관", "경로당",
-            )
-            if source not in WELFARE_CENTER_SOURCES and not any(k in title for k in SENIOR_KEYWORDS):
+            # 구청 등 일반 출처는 제목에 노인 관련 키워드가 없으면 AI 호출 생략 (llm_judge.SENIOR_KEYWORDS)
+            if source not in WELFARE_CENTER_SOURCES and not llm_judge.has_senior_keyword(title):
                 logger.info(f"⏭️  키워드 필터: {title[:30]}")
                 skipped_count += 1
                 continue
 
-            # 이전 실행에서 이미 SKIP 판정된 공고는 Gemini 재호출 없이 건너뜀
+            # 이전 실행에서 이미 SKIP 판정된 공고는 AI 재호출 없이 건너뜀
             if is_skipped(url):
                 skipped_count += 1
                 continue
 
             # 본문이 없으면 상세 페이지에서 가져옴
             if not content:
-                content = fetch_detail_content(url, source)
-            ai_summary = summarize_with_gemini(title, content, source)
+                content = fetch_detail_content(url, source, title)
+            ai_summary = llm_judge.judge_notice(title, content, source, source in WELFARE_CENTER_SOURCES)
+            stats["llm_calls"] += 1
             if ai_summary.strip().upper() == "ERROR":
-                logger.warning(f"⚠️ Gemini 실패로 보류(다음 실행 재시도): {title[:30]}")
+                stats["llm_errors"] += 1
+                logger.warning(f"⚠️ AI 요약 실패로 보류(다음 실행 재시도): {title[:30]}")
                 continue
             if ai_summary.strip().upper() == "SKIP":
                 logger.info(f"🚫 AI 필터링: {title[:30]}")
@@ -1254,6 +1261,7 @@ def run_scraping_pipeline(request=None):
         save_to_firestore(title, ai_summary, source, url)
         saved_count += 1
 
+    stats["saved"], stats["skipped"] = saved_count, skipped_count
     result_msg = (
         f"✅ 파이프라인 완료 | "
         f"수집: {len(all_articles)}건, "

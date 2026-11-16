@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  어르신 알리미 수집 파이프라인 로컬 실행 (2026-11-16)
+  - 매일 09:00·18:00 실행. 맥이 잠자기였다면 깨어날 때 실행됨 (꺼져 있었으면 건너뜀 → 헬스체크가 알림)
+  - AI 판정: 맥의 Ollama (LLM_PROVIDER=ollama, 모델 qwen2.5:14b)
+  - Firestore 인증: gcloud ADC (gcloud auth application-default login)
+  - 원본은 이 파일, ~/Library/LaunchAgents/에는 심볼릭 링크
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.seniorwelfare.pipeline</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/bin/caffeinate</string>
+    <string>-i</string>
+    <string>/Users/chae/projects/senior-welfare-app/backend/venv/bin/python</string>
+    <string>/Users/chae/projects/senior-welfare-app/backend/scraping_function.py</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>/Users/chae/projects/senior-welfare-app/backend</string>
+  <key>StartCalendarInterval</key>
+  <array>
+    <dict>
+      <key>Hour</key>
+      <integer>9</integer>
+      <key>Minute</key>
+      <integer>0</integer>
+    </dict>
+    <dict>
+      <key>Hour</key>
+      <integer>18</integer>
+      <key>Minute</key>
+      <integer>0</integer>
+    </dict>
+  </array>
+  <key>StandardOutPath</key>
+  <string>/Users/chae/projects/senior-welfare-app/logs/pipeline.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/chae/projects/senior-welfare-app/logs/pipeline.log</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+    <key>LANG</key>
+    <string>ko_KR.UTF-8</string>
+    <key>PYTHONUNBUFFERED</key>
+    <string>1</string>
+    <key>LLM_PROVIDER</key>
+    <string>ollama</string>
+    <key>GOOGLE_CLOUD_PROJECT</key>
+    <string>senior-welfare-app</string>
+  </dict>
+</dict>
+</plist>

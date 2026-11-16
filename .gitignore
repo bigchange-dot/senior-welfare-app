@@ -8,3 +8,6 @@ backend/*adminsdk*.json
 backend/*service-account*.json
 backend/venv/
 .omc/
+
+# 로컬 수집 실행 로그 (launchd)
+logs/
