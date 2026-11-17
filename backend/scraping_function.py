@@ -1,10 +1,10 @@
 """
-Track A: 데이터 수집 및 AI 가공
+Track A: 데이터 수집 및 AI 가공 (ARCHITECTURE.md 3.2)
 - 복지로 공공데이터 API
-- 성동구청 채용/어르신 일자리 스크래핑
-- 강북구청 채용/보도자료/언론보도 스크래핑
-- Gemini AI 필터링 & 요약
-- Firestore 저장 (중복 방지)
+- 서울 구청 게시판 13곳 + 성동구청 채용, 노인복지관 7곳 스크래핑
+- AI 판정·요약 (llm_judge.py — 규칙 필터, Ollama/Gemini)
+- Firestore 저장 (중복 방지) + 실행 기록 (monitoring.py)
+- 실행: 맥 launchd가 이 파일을 직접 실행 (`__main__`), Cloud Functions HTTP 트리거는 비공개·일시정지
 """
 
 import os
@@ -159,11 +159,7 @@ def fetch_detail_content(url: str, source: str, title: str = "") -> str:
     """
     limit = llm_judge.CONTENT_CHARS
     try:
-        if "gangbuk" in url:
-            session = _get_gangbuk_session(url)
-            res = session.get(url, timeout=10)
-        else:
-            res = requests.get(url, headers=HEADERS, timeout=10)
+        res = requests.get(url, headers=HEADERS, timeout=10)
         res.raise_for_status()
         # 응답 헤더에 charset이 없으면 requests가 ISO-8859-1로 읽어 한글이 깨짐 (은평노인복지관 등)
         if "charset" not in res.headers.get("content-type", "").lower():
@@ -308,88 +304,6 @@ def scrape_seongdong_jobs() -> list[dict]:
 
 
 # ─────────────────────────────────────────────
-# Track A-3: 성동구 어르신 일자리
-# ─────────────────────────────────────────────
-def scrape_sdsenior() -> list[dict]:
-    # 사이트 개편(2026)으로 메인 페이지에 게시글 링크 없음 → 공지사항 게시판 직접 조회.
-    # 마포노인복지관과 동일한 data-wr-id 클릭형 게시판 솔루션.
-    # 주의: Cloud Functions(구글 IP)에서는 403 차단됨 → 파이프라인 목록에서 제외 상태.
-    return _scrape_wr_id_board(
-        "https://www.sdsenior.or.kr/bbs/board.php?bo_table=SDS_1010&me_code=1010",
-        "성동구 어르신일자리", "SDS_1010", "https://www.sdsenior.or.kr", "1010"
-    )
-
-
-# ─────────────────────────────────────────────
-# 강북구청 봇 감지(SAB) 우회 세션 생성
-# ─────────────────────────────────────────────
-def _get_gangbuk_session(url: str) -> requests.Session:
-    """
-    강북구청 SAB(ShieldABit) 봇 감지를 우회하는 세션 반환.
-    JS 챌린지 응답에서 sabFingerPrint / sabSignature 쿠키를 파싱해 재요청.
-    """
-    session = requests.Session()
-    session.headers.update(HEADERS)
-
-    res = session.get(url, timeout=15)
-    if "sabFingerPrint" in res.text:
-        fp_match  = re.search(r'sabFingerPrint\s*=\s*["\']?(\w+)', res.text)
-        sig_match = re.search(r'sabSignature\s*=\s*["\']?(\w+)', res.text)
-        if fp_match:
-            session.cookies.set("sabFingerPrint", fp_match.group(1), domain="www.gangbuk.go.kr")
-        if sig_match:
-            session.cookies.set("sabSignature", sig_match.group(1), domain="www.gangbuk.go.kr")
-        # 쿠키 설정 후 재요청
-        res = session.get(url, timeout=15)
-
-    res.raise_for_status()
-    return session
-
-
-def _scrape_gangbuk_board(url: str, label: str, limit: int = 15) -> list[dict]:
-    """강북구청 게시판 공통 스크래핑 로직."""
-    articles = []
-    try:
-        session = _get_gangbuk_session(url)
-        res     = session.get(url, timeout=15)
-        res.raise_for_status()
-        soup    = BeautifulSoup(res.text, "lxml")
-
-        rows = soup.select("table.board-list tbody tr, ul.board-list-ul li")
-        if not rows:
-            rows = soup.select("table tbody tr")
-
-        logger.info(f"{label}: {len(rows)}개 행 발견")
-
-        for row in rows[:limit]:
-            try:
-                link_tag = row.select_one("td.subject a, td.title a, td a")
-                if not link_tag:
-                    continue
-                title = link_tag.get_text(strip=True)
-                href  = link_tag.get("href", "")
-                if href.startswith("/"):
-                    detail_url = "https://www.gangbuk.go.kr" + href
-                elif href.startswith("http"):
-                    detail_url = href
-                elif "viewCount" in href:
-                    # 언론보도: javascript:viewCount('ID', 'https://...')
-                    m = re.search(r"viewCount\([^,]+,\s*'([^']+)'", href)
-                    if not m:
-                        continue
-                    detail_url = m.group(1)
-                else:
-                    continue
-                if title:
-                    articles.append({"title": title, "url": detail_url, "content": "", "source": "강북구청"})
-            except Exception as e:
-                logger.warning(f"⚠️ {label} 행 파싱 오류: {e}")
-    except Exception as e:
-        logger.error(f"❌ {label} 스크래핑 오류: {e}")
-    return articles
-
-
-# ─────────────────────────────────────────────
 # 서울 구청 공통 스크래퍼 (SAB 없는 일반 구청)
 # ─────────────────────────────────────────────
 def _scrape_seoul_board(url: str, label: str, base_domain: str, limit: int = 15) -> list[dict]:
@@ -486,36 +400,6 @@ def _scrape_g5_board(url: str, label: str, base_domain: str, limit: int = 15, ve
     except Exception as e:
         logger.error(f"❌ {label} 스크래핑 오류: {e}")
     return articles
-
-
-# ─────────────────────────────────────────────
-# Track A-4: 강북구청 채용공고
-# ─────────────────────────────────────────────
-def scrape_gangbuk_jobs() -> list[dict]:
-    return _scrape_gangbuk_board(
-        "https://www.gangbuk.go.kr/portal/bbs/B0000154/list.do?menuNo=200510",
-        "🏢 강북구청 채용", limit=15
-    )
-
-
-# ─────────────────────────────────────────────
-# Track A-5: 강북구청 보도자료
-# ─────────────────────────────────────────────
-def scrape_gangbuk_press() -> list[dict]:
-    return _scrape_gangbuk_board(
-        "https://www.gangbuk.go.kr/portal/bbs/B0000142/list.do?menuNo=200625",
-        "📰 강북구청 보도자료", limit=10
-    )
-
-
-# ─────────────────────────────────────────────
-# Track A-6: 강북구청 언론보도
-# ─────────────────────────────────────────────
-def scrape_gangbuk_media() -> list[dict]:
-    return _scrape_gangbuk_board(
-        "https://www.gangbuk.go.kr/portal/bbs/B0000260/list.do?menuNo=200638",
-        "📺 강북구청 언론보도", limit=10
-    )
 
 
 # ─────────────────────────────────────────────
@@ -861,76 +745,6 @@ def scrape_surak_welfare() -> list[dict]:
 
 
 # ─────────────────────────────────────────────
-# Track A-13: 시립노원노인종합복지관 (노원구)
-# URL: https://www.nowonsenior.or.kr/bbs/board.php?bo_table=board01
-# 확인: G5 BBS 표준 구조
-# ─────────────────────────────────────────────
-def scrape_nowon_welfare() -> list[dict]:
-    return _scrape_g5_board(
-        "https://www.nowonsenior.or.kr/bbs/board.php?bo_table=board01",
-        "노원노인복지관", "https://www.nowonsenior.or.kr", limit=15
-    )
-
-
-# ─────────────────────────────────────────────
-# Track A-14: 신내노인종합복지관 (중랑구)
-# URL: http://shinnaesenior.or.kr/bbs/board.php?bo_table=0401
-# 확인: G5 BBS 표준 구조
-# ─────────────────────────────────────────────
-def scrape_shinnae_welfare() -> list[dict]:
-    return _scrape_g5_board(
-        "http://shinnaesenior.or.kr/bbs/board.php?bo_table=0401",
-        "신내노인복지관", "http://shinnaesenior.or.kr", limit=15
-    )
-
-
-# ─────────────────────────────────────────────
-# Track A-15: 마포노인종합복지관 (마포구)
-# URL: http://senior21.or.kr/bbs/board.php?bo_table=notice
-# 확인: G5 BBS 표준 구조
-# ─────────────────────────────────────────────
-def _scrape_wr_id_board(url: str, label: str, bo_table: str, base_domain: str, me_code: str, limit: int = 15) -> list[dict]:
-    """<tr class="list-row-clickable" data-wr-id="..."> 구조 게시판 스크래핑.
-
-    행에 <a> 링크가 없고 클릭 시 JS로 이동하므로 data-wr-id로 상세 URL을 조합.
-    제목 셀 위치가 사이트마다 달라(마포 2번째, 성동 3번째) 가장 긴 텍스트 셀을 제목으로 사용."""
-    articles = []
-    try:
-        res = requests.get(url, headers=HEADERS, timeout=15)
-        res.raise_for_status()
-        soup = BeautifulSoup(res.text, "lxml")
-
-        rows = soup.select("tbody tr.list-row-clickable[data-wr-id]")
-        logger.info(f"{label}: {len(rows)}개 행 발견")
-
-        for row in rows[:limit]:
-            try:
-                wr_id = row.get("data-wr-id", "").strip()
-                if not wr_id:
-                    continue
-                cells = [td.get_text(" ", strip=True) for td in row.select("td")]
-                title = max(cells, key=len) if cells else ""
-                if not title or len(title) < 3:
-                    continue
-                detail_url = f"{base_domain}/bbs/board.php?bo_table={bo_table}&wr_id={wr_id}&me_code={me_code}"
-                articles.append({"title": title, "url": detail_url, "content": "", "source": label})
-            except Exception as e:
-                logger.warning(f"⚠️ {label} 행 파싱 오류: {e}")
-    except Exception as e:
-        logger.error(f"❌ {label} 스크래핑 오류: {e}")
-    return articles
-
-
-def scrape_mapo_welfare() -> list[dict]:
-    # 2026-09-03 기준 senior21.or.kr 이 모든 요청을 "Access Denied (Bot Detection)" 403으로 차단.
-    # 브라우저 UA로도 동일 → 파이프라인에서 제외. 차단 해제 시 scrapers 목록에 복원.
-    return _scrape_wr_id_board(
-        "https://senior21.or.kr/bbs/board.php?bo_table=MPB_2010&lang=ko&me_code=2010",
-        "마포노인복지관", "MPB_2010", "https://senior21.or.kr", "2010"
-    )
-
-
-# ─────────────────────────────────────────────
 # Track A-15c: 약수노인종합복지관 (중구)
 # URL: http://www.yssenior.co.kr/bbs/board.php?bo_table=notice
 # 구조: G5 BBS 표준
@@ -1012,18 +826,6 @@ def scrape_jongno_welfare() -> list[dict]:
     return _scrape_g5_board(
         "https://jongnonoin.or.kr/bbs/board.php?bo_table=050101",
         "종로노인복지관", "https://jongnonoin.or.kr", limit=15, verify_ssl=False
-    )
-
-
-# ─────────────────────────────────────────────
-# Track A-16: 시립강북노인종합복지관 (강북구)
-# URL: https://www.gswc.or.kr/bbs/board.php?bo_table=0201_1
-# 확인: G5 BBS 표준 구조
-# ─────────────────────────────────────────────
-def scrape_gangbuk_welfare() -> list[dict]:
-    return _scrape_g5_board(
-        "https://www.gswc.or.kr/bbs/board.php?bo_table=0201_1",
-        "강북노인복지관", "https://www.gswc.or.kr", limit=15
     )
 
 
@@ -1146,13 +948,12 @@ def run_scraping_pipeline(request=None):
 def _run_pipeline(stats: dict) -> str:
     logger.info("🚀 스크래핑 파이프라인 시작")
 
+    # 제외한 출처의 스크래퍼는 2026-11-18 코드에서 삭제 (되살릴 때는 git 이력 742c192 이전 참고):
+    #   강북구청 채용·보도자료·언론보도(구글 IP·맥 모두 연결 끊김), 성동노인종합복지관(구글 IP 403),
+    #   마포노인복지관(봇 차단 403), 강북노인복지관(403), 신내노인복지관(SSL 오류), 노원노인복지관(게시판 없음)
     scrapers = [
         fetch_bokjiro_api,
         scrape_seongdong_jobs,
-        # scrape_sdsenior       — 구글 IP 403 차단 (한국 IP는 정상, 2026-09 확인). 파서는 수정 완료
-        # scrape_gangbuk_jobs / scrape_gangbuk_press / scrape_gangbuk_media
-        #   — 구글 IP 차단(2026-10-26~)에 이어 맥(한국 IP)에서도 연결 끊김(2026-11-16 저녁~11-17, 4회 연속)
-        #     → 사용자 결정으로 제외 (2026-11-17). 우회하지 않음. 다시 열리면 주석 해제
         scrape_nowon,
         scrape_dobong,
         scrape_jungnang,
@@ -1166,18 +967,14 @@ def _run_pipeline(stats: dict) -> str:
         scrape_dongjak,          # 동작 ✅ (2026-05-06 추가)
         scrape_gwanak,           # 관악 ✅ (2026-05-06 추가, doBbsFView)
         scrape_yangcheon,        # 양천 ✅ (2026-05-06 추가, doBbsFView + wdigm_title)
-        # 노인복지관 (접속 가능한 8개)
+        # 노인복지관 (7곳)
         scrape_surak_welfare,    # 노원 수락 ✅
-        # scrape_mapo_welfare   — 봇 차단(403 Bot Detection, 2026-09 확인)
         scrape_dobong_welfare,   # 도봉 ✅
         scrape_eunpyeong_welfare, # 은평 ✅
         scrape_jongno_welfare,   # 종로 ✅ (2026-04-09 추가, SSL 만료로 verify=False)
         scrape_yaksu_welfare,    # 중구 약수 ✅ (2026-04-09 추가)
         scrape_yongsan_welfare,  # 용산 ✅ (2026-04-09 추가)
         scrape_seodaemun_welfare, # 서대문 ✅ (2026-04-09 추가)
-        # scrape_nowon_welfare   — 게시판 없음 (존재하지 않는 bo_table)
-        # scrape_shinnae_welfare — SSL 인증서 오류
-        # scrape_gangbuk_welfare — 403 Forbidden
     ]
 
     all_articles: list[dict] = []

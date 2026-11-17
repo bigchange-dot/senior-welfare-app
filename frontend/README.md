@@ -32,9 +32,9 @@ adb logcat -c && adb logcat AndroidRuntime:E flutter:V *:S
 | `lib/main.dart` | 앱 진입점, Firebase 초기화, 3탭 스캐폴드 |
 | `lib/firebase_options.dart` | Firebase 초기화 옵션 (수동 작성) |
 | `lib/theme.dart` | SeniorTheme 전역 디자인 토큰 |
-| `lib/screens/home_screen.dart` | 홈(속보) 탭 — 필터 칩 + Firestore 실시간 스트림 |
+| `lib/screens/home_screen.dart` | 홈(속보) 탭 — 필터 칩 + Firestore 1회 조회(get, 비용 절감) |
 | `lib/screens/webview_screen.dart` | 공고 상세 — InApp WebView + AdMob Interstitial |
-| `lib/screens/my_region_screen.dart` | 내 지역 탭 |
+| `lib/screens/bookmarks_screen.dart` | 찜 탭 — 찜한 공고·내 지역 공고 |
 | `lib/screens/settings_screen.dart` | 설정 탭 — 지역 선택, 알림 ON/OFF |
 | `lib/widgets/notice_card.dart` | 공고 카드 위젯 |
 | `lib/services/fcm_service.dart` | FCM 초기화 및 토픽 구독 관리 |
