@@ -1150,9 +1150,9 @@ def _run_pipeline(stats: dict) -> str:
         fetch_bokjiro_api,
         scrape_seongdong_jobs,
         # scrape_sdsenior       — 구글 IP 403 차단 (한국 IP는 정상, 2026-09 확인). 파서는 수정 완료
-        scrape_gangbuk_jobs,
-        scrape_gangbuk_press,
-        scrape_gangbuk_media,
+        # scrape_gangbuk_jobs / scrape_gangbuk_press / scrape_gangbuk_media
+        #   — 구글 IP 차단(2026-10-26~)에 이어 맥(한국 IP)에서도 연결 끊김(2026-11-16 저녁~11-17, 4회 연속)
+        #     → 사용자 결정으로 제외 (2026-11-17). 우회하지 않음. 다시 열리면 주석 해제
         scrape_nowon,
         scrape_dobong,
         scrape_jungnang,

@@ -77,6 +77,8 @@ Claude Code가 이 프로젝트에서 작업할 때 반드시 따르는 규칙�
   18:00 회차는 맥이 켜져 있을 때만 돈다 (사용자 결정 2026-11-16)
   - 깨우기 예약 (시스템 설정, 프로젝트 밖): `sudo pmset repeat wakeorpoweron MTWRFSU 09:01:00` — 확인 `pmset -g sched`, 해제 `sudo pmset repeat cancel`
   - FileVault가 켜져 있고 자동 로그인이 꺼져 있어 재시동 후에는 로그인해야 수집이 시작됨
+  - 뚜껑 닫힌 배터리 상태에서는 macOS 점검 깨어남(DarkWake) 때 작업이 시작돼 잠들고 깨기를 반복하며 느리게 끝남(18시 회차 1시간).
+    `caffeinate`로 못 막음. Ollama 호출 재시도로 결과는 정상 (2026-11-17 확인)
 - Firestore 인증: gcloud ADC (`~/.config/gcloud/application_default_credentials.json`, 할당량 프로젝트 `senior-welfare-app`).
   만료되면 **터미널 앱에서** `gcloud auth application-default login` (Claude Code `!`로는 브라우저가 안 열림)
 - 수동 실행: `cd backend && LLM_PROVIDER=ollama GOOGLE_CLOUD_PROJECT=senior-welfare-app venv/bin/python scraping_function.py`

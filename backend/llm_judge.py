@@ -47,12 +47,12 @@ def provider() -> str:
 # ─────────────────────────────────────────────
 RULE_SKIP = [
     ("합격·선정 결과", re.compile(
-        r"합격자|합격\s*예정자|최종\s*합격|서류\s*전형|면접\s*전형|추첨\s*결과|당첨자|당첨\s*결과|선정\s*결과|선발\s*결과")),
+        r"합격자|합격\s*예정자|최종\s*합격|서류\s*전형|서류\s*심사|면접\s*전형|추첨\s*결과|당첨자|당첨\s*결과|선정\s*결과|선발\s*결과")),
     ("행정 공개", re.compile(
         r"업무추진비|수의계약|운영위원회|회의록|정보\s*공개|결과\s*공개|추진\s*현황|사용\s*내역")),
-    ("행정 공고", re.compile(r"공시송달|입찰|견적|행정처분|입법예고|조례|명단\s*공표|기관\s*공표|위반\s*사실\s*공표")),
+    ("행정 공고", re.compile(r"공시송달|입찰|견적|납품\s*업체|행정처분|입법예고|조례|명단\s*공표|기관\s*공표|위반\s*사실\s*공표")),
     # 서비스 제공기관·수행기관을 뽑는 공고 (어르신이 아니라 기관 대상)
-    ("기관 모집", re.compile(r"(제공|수행|수탁|위탁|운영)\s*기관\s*(모집|공모|선정|지정)|수탁자\s*(모집|선정)|위탁\s*운영\s*(기관\s*|법인\s*)?(모집|공모)|민간\s*위탁")),
+    ("기관 모집", re.compile(r"(제공|수행|수탁|위탁|운영|지원)\s*기관\s*(모집|공모|선정|지정)|수탁자\s*(모집|선정)|위탁\s*운영\s*(기관\s*|법인\s*)?(모집|공모)|민간\s*위탁")),
     # 종사자 채용 — 2차 평가에서 LLM이 "필라테스 강사 채용" 등 3건을 통과시켜 규칙으로 고정.
     # 경기 새올 실측(2026-11-16)에서 "치매안심센터 기간제근로자 채용"류가 키워드 필터를 통과해 직종 추가
     # "시니어 강사", "어르신 강사"처럼 어르신이 일하는 자리는 제외하지 않는다
@@ -159,21 +159,41 @@ def build_prompt(title: str, content: str, source: str, is_center: bool, today: 
 # ─────────────────────────────────────────────
 # 3. LLM 호출
 # ─────────────────────────────────────────────
+OLLAMA_RETRIES    = 2    # 실패 시 추가 시도 횟수
+OLLAMA_RETRY_WAIT = 10   # 초
+
+
 def _call_ollama(prompt: str) -> str:
-    res = requests.post(
-        f"{OLLAMA_URL}/api/generate",
-        json={
-            "model":   OLLAMA_MODEL,
-            "system":  SYSTEM,
-            "prompt":  prompt,
-            "stream":  False,
-            "format":  JSON_SCHEMA,          # 구조화 출력 (JSON 깨짐 방지)
-            "options": {"temperature": 0.1},
-        },
-        timeout=180,
-    )
-    res.raise_for_status()
-    return res.json()["response"]
+    """Ollama 호출. 연결 오류·5xx는 잠시 뒤 다시 시도한다.
+
+    맥이 뚜껑 닫힌 채 배터리로 자다가 점검차 잠깐 깨어날 때(DarkWake) launchd 작업이 시작되면,
+    실행 도중 다시 잠들었다 깨면서 Ollama가 500을 돌려준다 (2026-11-17 18시 실행에서 2건 보류).
+    깨어난 직후 다시 부르면 대부분 성공한다.
+    """
+    for attempt in range(OLLAMA_RETRIES + 1):
+        try:
+            res = requests.post(
+                f"{OLLAMA_URL}/api/generate",
+                json={
+                    "model":   OLLAMA_MODEL,
+                    "system":  SYSTEM,
+                    "prompt":  prompt,
+                    "stream":  False,
+                    "format":  JSON_SCHEMA,          # 구조화 출력 (JSON 깨짐 방지)
+                    "options": {"temperature": 0.1},
+                },
+                timeout=180,
+            )
+            if res.status_code < 500:
+                res.raise_for_status()
+                return res.json()["response"]
+            error = requests.HTTPError(f"{res.status_code} Server Error", response=res)
+        except (requests.ConnectionError, requests.Timeout) as e:
+            error = e
+        if attempt < OLLAMA_RETRIES:
+            logger.warning(f"⏳ Ollama 호출 실패({error}), {OLLAMA_RETRY_WAIT}초 뒤 다시 시도 ({attempt + 1}/{OLLAMA_RETRIES})")
+            time.sleep(OLLAMA_RETRY_WAIT)
+    raise error
 
 
 _gemini = None
