@@ -8,7 +8,11 @@
       "*.pyc",
       ".env.yaml",
       ".omc",
-      "*.log"
+      "*.log",
+      "tests",
+      ".pytest_cache",
+      "pytest.ini",
+      "requirements-dev.txt"
     ]
   },
   "firestore": {

@@ -16,6 +16,9 @@ from monitoring import check_pipeline_health
 # ─────────────────────────────────────────────
 @https_fn.on_request(
     region="asia-northeast3",       # 서울 리전
+    # 비공개 (2026-11-17 보안 점검): 예전엔 누구나 호출 가능(allUsers)해 남이 수집을 반복 실행할 수 있었음.
+    # 클라우드 수집은 일시정지 상태. 다시 쓰려면 Cloud Scheduler 작업에 OIDC 인증(서비스 계정)을 붙일 것
+    invoker="private",
     timeout_sec=1800,               # 30분 (Gemini rate limit sleep 13초 × 100+건 대응)
     memory=options.MemoryOption.MB_512,
     secrets=["GEMINI_API_KEY", "DATA_GO_KR_KEY"],

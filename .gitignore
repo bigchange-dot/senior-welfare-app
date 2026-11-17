@@ -11,3 +11,4 @@ backend/venv/
 
 # 로컬 수집 실행 로그 (launchd)
 logs/
+.pytest_cache/

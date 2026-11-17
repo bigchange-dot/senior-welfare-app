@@ -1,0 +1,4 @@
+# 개발·테스트 전용 (배포에 포함하지 않음 — firebase.json ignore)
+# 설치: venv/bin/pip install -r requirements-dev.txt
+# 실행: cd backend && venv/bin/python -m pytest
+pytest>=8.0
