@@ -9,8 +9,17 @@ Claude Code가 이 프로젝트에서 작업할 때 반드시 따르는 규칙�
 - **앱명:** 어르신 알리미 (Senior Welfare Notifier)
 - **스택:** Flutter (frontend) + Firebase Cloud Functions Python 3.11 (backend)
 - **DB:** Firestore (`welfare_notices` 컬렉션)
-- **AI:** Gemini API `gemini-3.1-flash-lite-preview`
-- **문서:** `ARCHITECTURE.md` (설계), `TODO.md` (작업 추적)
+- **AI:** 맥 로컬 Ollama `qwen2.5:14b` (2026-11-16~). Gemini `gemini-3.1-flash-lite-preview`는 클라우드 예비 — 선불 크레딧 소진 상태
+- **수집 실행:** 맥 launchd (아래 "로컬 수집 실행"). 알림·헬스체크는 Cloud Functions
+- **문서:** `ARCHITECTURE.md` (설계), `TODO.md` (작업 추적), `docs/` (점검·조사 기록 — 2026-11 전체 검토 결과)
+
+---
+
+## 테스트 (2026-11-18 추가)
+
+- 백엔드: `cd backend && venv/bin/python -m pytest` (네트워크·Firestore·LLM 안 부름, pytest는 `requirements-dev.txt`)
+- 프론트엔드: `cd frontend && flutter test` → 끝나면 `git checkout -- frontend/analysis_options.yaml`
+- 판정 규칙·요약 검사·헬스체크·새올 파서·카드 레이아웃을 바꾸면 테스트도 함께 고칠 것
 
 ---
 
@@ -86,7 +95,9 @@ Claude Code가 이 프로젝트에서 작업할 때 반드시 따르는 규칙�
   만료되면 **터미널 앱에서** `gcloud auth application-default login` (Claude Code `!`로는 브라우저가 안 열림)
 - 수동 실행: `cd backend && LLM_PROVIDER=ollama GOOGLE_CLOUD_PROJECT=senior-welfare-app venv/bin/python scraping_function.py`
   - 밀린 공고를 알림 없이 저장하려면 `SILENT_SAVE=1` 추가
-- Cloud Scheduler `scraping-morning`·`scraping-evening`은 일시정지 상태. 클라우드로 되돌리려면 `gcloud scheduler jobs resume <이름> --location=asia-northeast3` (Gemini 충전 필요)
+- Cloud Scheduler `scraping-morning`·`scraping-evening`은 일시정지 상태. 클라우드로 되돌리려면 `gcloud scheduler jobs resume <이름> --location=asia-northeast3`
+  — Gemini 충전 필요, 그리고 `scraping_function`이 비공개(`invoker="private"`, 2026-11-17)라 스케줄러 작업에 OIDC 인증을 붙여야 함
+- ⚠️ `scraping_function` 주소로 요청을 보내면 GET·HEAD 가리지 않고 수집이 실제로 실행된다. 확인용 요청 금지
 - 실패 감시: 클라우드 `health_check_function`(10:00·19:00)이 실행 기록을 보고 메일 알림 (ARCHITECTURE.md 3.5). 맥이 꺼져 있어 수집을 못 하면 "N시간째 실행되지 않음" 메일이 옴
 
 ---

@@ -1,8 +1,8 @@
 # 노인 복지 속보 알림 앱 — 아키텍처 문서
 
 > 최초 작성: 2026-03-03
-> 최종 업데이트: 2026-03-12
-> 버전: 1.1.0
+> 최종 업데이트: 2026-11-18 (전체 검토 1~7단계 반영)
+> 앱 버전: 1.4.0+7 제출본, 1.4.1+8 준비 중 (TODO.md)
 
 ---
 
@@ -109,13 +109,17 @@ Gemini가 SKIP 판정한 공고의 URL 캐시. 문서 ID는 `welfare_notices`와
 
 ### 3.2 Track A — 스크래핑 함수 (`scraping_function.py`)
 
-**역할:** Cloud Scheduler → HTTP 트리거 → 각 사이트 크롤링 → AI 요약 → Firestore 저장
+**역할:** 각 사이트 수집 → AI 판정·요약 → Firestore 저장 → 실행 기록
 
-**크롤링 대상 (v1.1 기준):**
+**실행 방식 (2026-11-16~):** 맥 launchd가 `scraping_function.py`를 직접 실행(09:00·18:00, CLAUDE.md "로컬 수집 실행").
+Cloud Functions HTTP 트리거(`scraping_function`)는 남아 있지만 비공개(`invoker="private"`)이고 스케줄러는 일시정지.
+
+**수집 대상 (2026-11-18, `_run_pipeline`의 `scrapers`):**
 - 복지로: 공공 DATA API (`DATA_GO_KR_KEY`) — `NationalWelfareInformationsV001`
-- 노원구청 / 도봉구청 / 중랑구청 / 마포구청 / 은평구청: `_scrape_seoul_board()` 공통 헬퍼
-- 성동구청: `requests` + `BeautifulSoup4` HTML 파싱
-- 강북구청: `requests` + `BeautifulSoup4` + SAB 봇 감지 우회
+- 구청 게시판 13곳: 노원·도봉·중랑·마포·은평·종로·중구·용산·서대문·강서·동작·관악·양천 + 성동구청 채용
+  (`_scrape_seoul_board()` / `_scrape_nowon_board()` 등 공통 헬퍼)
+- 노인복지관 7곳: 수락·도봉·은평·종로·약수·용산·서대문 (`_scrape_g5_board()` 등). 저장 공고의 대부분이 여기서 나옴
+- 제외: 강북구청(차단), 마포·성동·신내·강북·노원 노인복지관(차단·폐쇄·게시판 없음) — 스크래퍼 코드는 2026-11-18 삭제 (git 이력 742c192 이전)
 
 **AI 판정·요약 (`llm_judge.py`, 2026-11-16 개편):**
 
@@ -162,13 +166,12 @@ stdout에 `{"severity","message"}` JSON 한 줄로 출력해 severity 필터가 
 
 **접속 불가 출처 (2026-09-03 기준):**
 - 마포노인복지관(senior21.or.kr): 봇 차단 403 → 스크래퍼 목록에서 제외
-- 중랑구청: Cloud Functions(구글 IP)에서 연결 타임아웃, 한국 IP에서는 정상 → 해외 IP 차단으로 추정, 코드로 해결 불가
+- 중랑구청: 당시 구글 IP에서 연결 타임아웃 → 2026-10~11 클라우드·맥 모두 정상 수집 (해결됨)
 - 성동노인종합복지관(sdsenior.or.kr): 파서는 재작성했으나 구글 IP에서 403 차단 → 목록에서 제외. 한국 IP 프록시 등 인프라 대안 필요
 
-**Lazy 초기화 패턴 (배포 타임아웃 방지):**
+**Lazy 초기화 패턴 (배포 타임아웃 방지):** Firestore는 `_get_db()`, Gemini 클라이언트는 `llm_judge._call_gemini()` 안에서 처음 쓸 때 만든다.
 ```python
 _db = None
-_gemini_client = None
 
 def _get_db():
     global _db
@@ -181,20 +184,8 @@ def _get_db():
 
 **역할:** Firestore `onCreate` 트리거 → FCM 전송 → `is_notified` 업데이트
 
-**FCM Topic 매핑:**
-```python
-SOURCE_TOPIC_MAP = {
-    "복지로":             "bokjiro",
-    "노원구청":           "nowon",
-    "도봉구청":           "dobong",
-    "중랑구청":           "jungnang",
-    "마포구청":           "mapo",
-    "은평구청":           "eunpyeong",
-    "성동구청":           "seongdong",
-    "성동구 어르신일자리": "seongdong",
-    "강북구청":           "gangbuk",
-}
-```
+**FCM Topic 매핑:** `notification_function.py`의 `SOURCE_TOPIC_MAP` — 출처(구청·복지관) → 구 토픽. 복지관은 소속 구의 토픽으로 보낸다
+(예: `도봉노인복지관` → `dobong`, `약수노인복지관` → `junggu`). 앱의 구독 토픽 전체 목록은 `FcmService.allTopics`(17개).
 
 **발송 토픽:** `all` (전체) + 출처별 지역 토픽 동시 발송
 
@@ -387,6 +378,9 @@ senior-welfare-app/
 │   ├── certs/intermediates.pem    # 서버가 안 보내는 중간 인증서 3개 (tls_compat.py가 사용)
 │   ├── eminwon.py                 # 새올 고시공고 공통 파서 (경기용, 파이프라인 미연결 — dry-run만)
 │   ├── requirements.txt           # Python 패키지
+│   ├── requirements-dev.txt       # 테스트 전용 (pytest, 배포 제외)
+│   ├── pytest.ini                 # 테스트 설정
+│   ├── tests/                     # 백엔드 테스트 (2026-11-18, 배포 제외)
 │   └── .env.yaml                  # 환경변수 (gitignore — API 키)
 │
 ├── frontend/
@@ -412,12 +406,15 @@ senior-welfare-app/
 ├── setup-cloud-scheduler.sh       # Cloud Scheduler gcloud CLI 등록 스크립트
 ├── .env                           # 로컬 환경변수 (gitignore)
 ├── .gitignore
-└── DESIGN_DOCUMENT.md             # 이 파일
+├── CLAUDE.md                      # 작업 규칙·운영 메모
+├── TODO.md                        # 작업 현황
+├── figma.md                       # 초기 디자인 참고 (React 기준, 그대로 따르지 않음)
+└── ARCHITECTURE.md                # 이 파일
 ```
 
 ---
 
-## 7. 배포 현황 (2026-03-12 기준)
+## 7. 배포 현황 (2026-11-18 갱신)
 
 | 항목 | 상태 | 비고 |
 |------|------|------|
@@ -435,24 +432,22 @@ senior-welfare-app/
 | Firebase 앱 등록 (`com.seniorwelfare.senior_welfare_app`) | ✅ 완료 | google-services.json 적용 |
 | Flutter 앱 (Android 에뮬레이터) | ✅ 정상 작동 확인 | Firestore 연동 확인 |
 | Flutter 앱 (Android 실기기) | ✅ 확인 완료 | FCM·딥링크 정상 (2026-03-12) |
-| Flutter 앱 릴리즈 APK | ✅ 빌드 완료 | 46.7MB (2026-03-12) |
+| Play 스토어 | v1.4.0+7 제출 (2026-09 기록상 '검토 중' — 게시 여부는 Play Console에서 확인) | v1.4.1+8은 배너 광고 ID 입력 후 출시 (TODO.md) |
 | Flutter 앱 (iOS) | 🔲 미진행 | — |
 
 ---
 
 ## 8. 남은 작업
 
-→ 상세 작업 현황은 `TODO.md` 참고
+→ 상세 작업 현황은 `TODO.md` 참고 (2026-11-18 기준 주요 항목)
 
-| 항목 | 우선순위 |
-|------|----------|
-| 신규 구청 5개 스크래핑 URL 실제 확인 및 교체 | 높음 |
-| `flutter build appbundle --release` (AAB 빌드) | 높음 |
-| 개인정보처리방침 작성 및 호스팅 | 출시 전 필수 |
-| App Check 적용 (플레이스토어 등록 후) | 출시 전 필수 |
-| 앱 아이콘 · 스플래시 스크린 제작 | 중간 |
-| iOS 빌드 및 테스트 (GoogleService-Info.plist 등록 필요) | 중간 |
-| 서울 전체 25개 구 확장 (v1.2) | 낮음 |
+| 항목 | 비고 |
+|------|------|
+| v1.4.1+8 출시 | 배너 광고 단위 ID 입력 → 빌드 → Play 내부 테스트에서 꺼진 상태 알림 탭 확인 → 출시 |
+| 출처 확장 | 경기 노인복지관·시니어클럽 위주 조사, 강서·동작·관악은 그 구 복지관으로 교체 조사 (`docs/수집기-현황-2026-11-16.md`) |
+| 출처 목록 한 곳으로 모으기 | 지금 7곳에 흩어짐 — 출처 확장 때 함께 (`docs/구조-테스트-점검-2026-11-18.md`) |
+| 보안 보강 | 함수 전용 서비스 계정, 앱 Android 키 제한, App Check (`docs/보안-비용-점검-2026-11-17.md`) |
+| 운세 기능 (v1.5.0) | `docs/HANDOFF-2026-11-16.md` |
 
 ---
 
