@@ -45,6 +45,9 @@ Claude Code가 이 프로젝트에서 작업할 때 반드시 따르는 규칙�
 - `home_screen.dart`: `kIsWeb`일 때만 Mock 데이터, 디바이스는 Firestore 실데이터
 - AdMob Interstitial은 `webview_screen.dart`에 완전 구현됨
 - Kotlin 증분 컴파일 오류 발생 시 → `flutter clean` 후 재빌드
+- 로컬 빌드(디버그·업로드 키)는 FCM 토큰을 못 받음(`FIS_AUTH_ERROR`): `firebase_options.dart`의 Android 키가 Play 앱 서명 SHA-1로 제한됨.
+  알림·딥링크 확인은 Play 내부 테스트 트랙으로 (2026-11-17 확인)
+- `flutter analyze`/`build`가 `frontend/analysis_options.yaml`을 자동 수정함 → 커밋 전 `git checkout -- frontend/analysis_options.yaml`
 - ADB 경로 (Mac): `~/Library/Android/sdk/platform-tools` (구 Windows: `C:/Users/chae/AppData/Local/Android/Sdk/platform-tools`)
 - Mac 개발환경: Homebrew 설치 (Flutter, openjdk@17, python@3.11, firebase-cli, gcloud), 환경변수는 `~/.zprofile`
 
