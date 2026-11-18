@@ -1,0 +1,54 @@
+# 경기 노인복지관 출처 설정 초안 (2026-11-18 표본 12곳 1·2차 점검, docs/경기-복지관-조사-2026-11-18.md)
+#
+# 수집 방식(parser):
+#   dated_list = 범용 목록 파서 — 목록 페이지에서 '날짜가 가까이 붙은 링크'를 글로 읽음 (서버가 HTML로 그려 주는 게시판)
+#   g5         = 그누보드 (기존 _scrape_g5_board)
+#   anyboard   = 은평노인복지관과 같은 플랫폼 (/main/sub.html?boardID=wwwN, 글 링크에 Mode=view)
+#   json_api   = 목록을 JSON으로 받는 사이트 (전용 파서)
+#   js_link    = 글 링크가 자바스크립트(onclick)인 게시판 (전용 파서)
+# status: ok(목록 확인) / todo(추가 확인 필요) / blocked(403 등 차단 — 우회하지 않음)
+# tls: chain = 중간 인증서 누락 → backend/certs/intermediates.pem에 추가 필요 (ca_issuer = 받을 주소)
+#
+# 아직 파이프라인에 연결하지 않음: 앱에 경기 지역(시·도 → 시·군 2단계)과 'all' 토픽 정책을 먼저 정해야 함
+
+centers:
+  # ── 수원 ──
+  - {city: 수원시, name: SK청솔노인복지관, status: ok, parser: dated_list,
+     list_url: "http://scsnoin.or.kr/?state=notice"}
+  - {city: 수원시, name: 팔달노인복지관, status: ok, parser: dated_list,
+     list_url: "http://www.pdsenior.or.kr/paldalintro/paldal_notice.jsp"}
+  - {city: 수원시, name: 서호노인복지관, status: ok, parser: dated_list, tls: chain,
+     list_url: "https://www.seoho.or.kr/well/board/notice_list.jsp",
+     ca_issuer: "http://cacerts.digicert.com/RapidSSLG5TLSRSA4096SHA3842022CA1.crt"}
+  - {city: 수원시, name: 버드내노인복지관, status: todo, parser: anyboard,
+     home: "http://www.budnae.or.kr/main/main.html", note: "메뉴가 스크립트로만 그려짐. boardID www1~40에 게시판 없음 — 브라우저로 확인"}
+  - {city: 수원시, name: 밤밭노인복지관, status: blocked, home: "http://www.bambat.org/", note: "403 (맥에서도)"}
+  - {city: 수원시, name: 광교노인복지관, status: blocked, home: "http://www.ggsenior.or.kr/", note: "403"}
+
+  # ── 성남 ──
+  - {city: 성남시, name: 중원노인종합복지관, status: ok, parser: dated_list,
+     list_url: "https://jwnoin.org/bbs/?bid=notice", extra_urls: ["https://jwnoin.org/bbs/?bid=participant"],
+     note: "bid=sns는 사진 게시판이라 제외"}
+
+  # ── 화성 ──
+  - {city: 화성시, name: 동탄노인복지관, status: ok, parser: json_api,
+     list_url: "https://www.dtsenior.or.kr/api/bbs/1.0/base?BBS_CD=001&PAGE_NO=1&PAGE_SIZE=20",
+     note: "Accept: application/json + X-Requested-With: XMLHttpRequest 헤더 필요. 필드 SJ(제목)·REG_DT(등록일)·CNTN(본문)·SNTNC_NO(글번호), FIXING_YN=고정글"}
+
+  # ── 고양 ──
+  - {city: 고양시, name: 대화노인종합복지관, status: ok, parser: dated_list,
+     list_url: "https://senior-edu.net/guide/notice.php",
+     note: "본 사이트 community/notice.php는 2026-09 이후 글 없음. 활동은 선배시민 사이트(senior-edu.net)에 올라옴 — 어느 쪽을 볼지 결정"}
+
+  # ── 용인 ──
+  - {city: 용인시, name: 기흥노인복지관, status: ok, parser: anyboard,
+     list_url: "https://www.ygsenior.or.kr/main/sub.html?boardID=www14", note: "날짜 표기 형식이 은평과 다름 — 파서에서 처리"}
+
+  # ── 부천 ──
+  - {city: 부천시, name: 원미·소사·오정노인복지관 + 부천시니어클럽, status: ok, parser: js_link,
+     list_url: "https://senior.bucheon4u.kr/senior/user/bbs/BD_selectBbsList.do?q_domnCode=2&q_bbsCode=1005",
+     note: "시 운영 공동 포털 게시판 하나에 4기관 글이 모임. 제목 앞 기관 이름(원미·소사·오정·시니어클럽)으로 출처 구분"}
+
+  # ── 파주 ──
+  - {city: 파주시, name: 파주시노인복지관, status: ok, parser: g5,
+     list_url: "http://www.pajusenior.or.kr/notice"}
