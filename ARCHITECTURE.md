@@ -487,11 +487,11 @@ senior-welfare-app/
 | Firestore Database | ✅ 생성 완료 | asia-northeast3 |
 | Firestore 보안 규칙 | ✅ 배포 완료 | welfare_notices 읽기 허용 |
 | Firestore 복합 인덱스 | ✅ 배포 완료 | source + timestamp, region + timestamp (2026-11-18) |
-| AdMob 앱·광고단위 등록 | ✅ 완료 | `ca-app-pub-5634467403173492/3253182704` |
+| AdMob 앱·광고단위 등록 | ✅ 완료 | 전면 `…/3253182704`, 배너 `홈목록_배너` `…/4679949677` (2026-11-18) |
 | Firebase 앱 등록 (`com.seniorwelfare.senior_welfare_app`) | ✅ 완료 | google-services.json 적용 |
 | Flutter 앱 (Android 에뮬레이터) | ✅ 정상 작동 확인 | Firestore 연동 확인 |
 | Flutter 앱 (Android 실기기) | ✅ 확인 완료 | FCM·딥링크 정상 (2026-03-12) |
-| Play 스토어 | v1.4.0+7 제출 (2026-09 기록상 '검토 중' — 게시 여부는 Play Console에서 확인) | v1.4.1+8은 배너 광고 ID 입력 후 출시 (TODO.md) |
+| Play 스토어 | v1.4.0+7 제출 (2026-09 기록상 '검토 중' — 게시 여부는 Play Console에서 확인) | v1.5.0+9(v1.4.1 포함) 내부 테스트 준비 (2026-11-18) |
 | Flutter 앱 (iOS) | 🔲 미진행 | — |
 
 ---
@@ -502,8 +502,7 @@ senior-welfare-app/
 
 | 항목 | 비고 |
 |------|------|
-| v1.4.1+8 출시 | 배너 광고 단위 ID 입력 → 빌드 → Play 내부 테스트에서 꺼진 상태 알림 탭 확인 → 출시 |
-| v1.5.0 (지역 선택·경기) | `v1.5-regions` 브랜치. 출시 때 맥 수집에 `GYEONGGI=1` (TODO.md) |
+| v1.5.0+9 출시 (v1.4.1 포함) | Play 내부 테스트에서 지역 알림·꺼진 상태 알림 탭 확인 → 출시 → 맥 수집 `GYEONGGI=1` |
 | 경기 남은 출처 | 추가 확인 33곳 + 기흥(목록 날짜 암호화) (`docs/gyeonggi/gyeonggi_centers.yaml`) |
 | 보안 보강 | 함수 전용 서비스 계정, 앱 Android 키 제한, App Check (`docs/보안-비용-점검-2026-11-17.md`) |
 | 운세 기능 (v1.6 이후) | 설계 확정·구현 전 (`docs/운세-설계-2026-11-18.md`) |

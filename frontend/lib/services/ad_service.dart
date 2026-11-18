@@ -9,9 +9,8 @@ class AdService {
 
   // ── 실제 광고 단위 ID (AdMob 콘솔) ──
   static const String _interstitialProd = 'ca-app-pub-5634467403173492/3253182704';
-  // TODO: AdMob 콘솔에서 "배너" 광고 단위를 새로 만들고 아래 ID를 교체할 것.
-  //       교체 전에는 로드 실패 → 배너 자리가 비어 보임 (앱 동작에는 영향 없음)
-  static const String _bannerProd = 'ca-app-pub-5634467403173492/0000000000';
+  // 배너 "홈목록_배너" (2026-11-18 생성) — 홈 목록 6번째마다 BannerAdCard
+  static const String _bannerProd = 'ca-app-pub-5634467403173492/4679949677';
 
   // ── 구글 공식 테스트 ID (Android) ──
   static const String _interstitialTest = 'ca-app-pub-3940256099942544/1033173712';
