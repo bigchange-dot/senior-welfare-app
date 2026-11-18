@@ -81,7 +81,9 @@
 |------|------|------|
 | `title` | String | 원본 공고 제목 |
 | `ai_summary` | String | Gemini AI 요약 (이모지 포함, 20자 내외) |
-| `source` | String | 출처 (`복지로` / `성동구청` / `강북구청`) |
+| `source` | String | 출처 이름 (`복지로` / `도봉노인복지관` / `서호노인복지관` …) |
+| `region` | String | 지역 코드 = FCM 토픽 = 앱 `Region.id` (`nowon`, `gg-suwon`, 복지로는 `bokjiro`). v1.5, 2026-11-18 추가·기존 407건 백필 |
+| `province` | String | `seoul` / `gyeonggi` / `national` |
 | `url` | String | 원본 공고 URL |
 | `timestamp` | Timestamp | 공고 등록 시각 |
 | `is_notified` | Boolean | FCM 발송 완료 여부 |
@@ -95,6 +97,7 @@ Gemini가 SKIP 판정한 공고의 URL 캐시. 문서 ID는 `welfare_notices`와
 **컬렉션:** `pipeline_runs` / `system_status` (2026-11-16 추가, 백엔드 전용 — `monitoring.py`)
 
 수집 실행 기록. `pipeline_runs/{자동 ID}`는 실행마다 1건 쌓이는 이력, `system_status/pipeline`은 마지막 실행 1건(헬스체크가 읽음).
+`system_status/source_warmup`(v1.5)은 한 번 이상 수집을 마친 출처 이름 목록 — 여기 없는 출처의 첫 수집분은 알림 없이 저장한다.
 두 컬렉션 모두 `firestore.rules`의 기본 차단 규칙에 걸려 앱에서는 읽을 수 없다.
 
 | 필드 | 설명 |
@@ -116,10 +119,24 @@ Cloud Functions HTTP 트리거(`scraping_function`)는 남아 있지만 비공�
 
 **수집 대상 (2026-11-18, `_run_pipeline`의 `scrapers`):**
 - 복지로: 공공 DATA API (`DATA_GO_KR_KEY`) — `NationalWelfareInformationsV001`
-- 구청 게시판 13곳: 노원·도봉·중랑·마포·은평·종로·중구·용산·서대문·강서·동작·관악·양천 + 성동구청 채용
+- 구청 게시판 10곳: 노원·도봉·중랑·마포·은평·종로·중구·용산·서대문·양천 + 성동구청 채용
   (`_scrape_seoul_board()` / `_scrape_nowon_board()` 등 공통 헬퍼)
 - 노인복지관 7곳: 수락·도봉·은평·종로·약수·용산·서대문 (`_scrape_g5_board()` 등). 저장 공고의 대부분이 여기서 나옴
+- **게시판 출처 (v1.5, `board_sources.py` + 범용 목록 파서 `board_parser.py`):**
+  - 서울 4곳 — 6개월 저장 0건이던 강서·동작·관악구청 대신 강서노인종합·마곡·사당·관악노인종합복지관
+  - 경기 52기관 (복지관·시니어클럽, 24개 시·군) — **환경변수 `GYEONGGI=1`일 때만** (v1.5 앱 출시 때 켬)
+    - 전용 처리: 광주(글 링크가 javascript → `JS_LINKS`로 상세 주소), 부천 공동 포털(한 게시판에 4기관 → 제목 앞 기관 표시로 출처 구분,
+      `BOARD_LABELS`), 화성 동탄(JSON 목록·본문, `JSON_BOARDS`·`scrape_json_board`)
+  - 파서: 목록 페이지에서 '날짜가 가까이 붙은 링크'(링크 위 4단계, 400자·글 링크 2개 이하 영역)를 글로 읽음.
+    최근 45일 글만. 그누보드·`bid=`형·자체 구조를 사이트별 코드 없이 처리. 점검: `venv/bin/python board_parser.py [이름]`
 - 제외: 강북구청(차단), 마포·성동·신내·강북·노원 노인복지관(차단·폐쇄·게시판 없음) — 스크래퍼 코드는 2026-11-18 삭제 (git 이력 742c192 이전)
+
+**출처 등록표 `sources.py` (v1.5):** 출처 이름 → (지역 코드, 복지관 여부). 저장 시 `region`·`province`, 알림 토픽, 키워드 필터 면제(복지관)를
+모두 여기서 정한다. 예전 `SOURCE_TOPIC_MAP`(알림)·`WELFARE_CENTER_SOURCES`(수집)를 대신함. 앱 `frontend/lib/regions.dart`와 지역 코드·
+'준비 중' 여부가 맞는지 `tests/test_sources.py`가 확인한다. 새 출처: 등록표(또는 `board_sources.py`)에 추가 → 그 지역 첫 출처면 앱 `available: true`.
+
+**새 출처 첫 실행은 알림 없이 (v1.5):** `system_status/source_warmup`에 없는 출처의 공고는 그 실행에서 `is_notified=True`로 저장하고
+목록에 추가한다. 출처를 붙인 날 그동안 밀린 공고(경기 첫 실행은 약 300건 중 판정 통과분)가 한꺼번에 알림으로 나가지 않게.
 
 **AI 판정·요약 (`llm_judge.py`, 2026-11-16 개편):**
 
@@ -133,9 +150,10 @@ Cloud Functions HTTP 트리거(`scraping_function`)는 남아 있지만 비공�
 - 프롬프트에 오늘 날짜를 넣어 마감 지난 공고 제외. 본문은 800자까지 (기존 300자)
 - 출력은 JSON `{"decision": "PASS|SKIP", "summary": "..."}`. Ollama는 JSON 스키마 구조화 출력, Gemini는 `response_mime_type=application/json`
 - 저장 전 검사 `is_valid_summary()`: 40자 초과, 한자, 한글 4자 미만, **제목·본문에 없는 숫자**(지어낸 날짜·인원),
-  제목·본문에 없는 영문 단어 → 제목 기반 문구 `📢 제목 28자`로 대체
+  제목·본문에 없는 영문 단어, **제목과 다른 글을 요약**(흔한 말·기관 이름을 빼고 같은 낱말이나 두 글자 조각 2개 이상을 나누지 않음,
+  가정통신문·월간 소식 같은 정기 소식 제목은 예외 — `summary_matches_title`, 2026-11-18) → 제목 기반 문구 `📢 제목 28자`로 대체
 - LLM 선택: 환경변수 `LLM_PROVIDER` — `gemini`(기본, 클라우드) / `ollama`(맥 로컬, `qwen2.5:14b`)
-- **기간 지남 검사** `latest_date_in()`: 요약에 적힌 마지막 날짜(`11/12`, `10월 30일`, `~30일`)가 오늘보다 앞서면 SKIP.
+- **기간 지남 검사** `latest_date_in()`: 요약에 적힌 마지막 날짜(`11/12`, `10월 30일`, `~30일`, `10.27까지`·`~10.27`)가 오늘보다 앞서면 SKIP.
   LLM이 날짜 비교를 자주 놓침 (첫 로컬 실행에서 끝난 전시회·강좌 2건 저장)
 - Ollama 연결 오류·5xx는 10초 뒤 최대 2번 다시 시도 (맥이 실행 도중 잠들었다 깨면 500이 남, 2026-11-17)
 - 호출 실패는 `"ERROR"` → 저장하지 않고 다음 실행에 재시도, 실행 기록 `llm_errors`로 집계
@@ -162,7 +180,8 @@ stdout에 `{"severity","message"}` JSON 한 줄로 출력해 severity 필터가 
   `REQUESTS_CA_BUNDLE`로 지정해 해결 (2026-11-16). 인증서 검증은 끄지 않음
 - 은평·용산구청: 구글 IP 차단, 맥 로컬 수집으로 회복
 - 강북구청 3개 게시판: 구글 IP 차단(10-26~)에 이어 맥에서도 연결 끊김(11-16~17, 4회 연속) → **수집 목록에서 제외** (2026-11-17)
-- 강서·동작·관악구청: 수집은 되지만 2026-05 추가 이후 저장 0건 (어르신과 무관한 게시판)
+- 강서·동작·관악구청: 2026-05 추가 이후 저장 0건 (어르신과 무관한 게시판) → 2026-11-18 그 구의 복지관 게시판으로 교체
+- 마곡어르신복지관·수원 서호노인복지관: 중간 인증서 누락 → `certs/intermediates.pem`에 ZeroSSL DV CA 2·RapidSSL G5 추가 (2026-11-18)
 
 **접속 불가 출처 (2026-09-03 기준):**
 - 마포노인복지관(senior21.or.kr): 봇 차단 403 → 스크래퍼 목록에서 제외
@@ -184,8 +203,8 @@ def _get_db():
 
 **역할:** Firestore `onCreate` 트리거 → FCM 전송 → `is_notified` 업데이트
 
-**FCM Topic 매핑:** `notification_function.py`의 `SOURCE_TOPIC_MAP` — 출처(구청·복지관) → 구 토픽. 복지관은 소속 구의 토픽으로 보낸다
-(예: `도봉노인복지관` → `dobong`, `약수노인복지관` → `junggu`). 앱의 구독 토픽 전체 목록은 `FcmService.allTopics`(17개).
+**FCM Topic 매핑 (v1.5):** 공고 문서의 `region`을 지역 토픽으로 쓴다(없으면 `sources.region_of(source)`). 수집은 맥에서 돌아
+클라우드에 배포된 등록표보다 새로울 수 있어서 문서 값을 먼저 본다. 서울 토픽 이름은 v1.4 그대로(`nowon` 등), 경기는 `gg-suwon` 형식.
 
 **발송 토픽:** `all` (전체) + 출처별 지역 토픽 동시 발송
 
@@ -237,10 +256,16 @@ def _get_db():
 
 ## 4. Frontend 설계
 
-**FCM 토픽 구독 규칙 (`FcmService.syncSubscriptions`, 2026-09-03):**
+**지역 (v1.5, 2026-11-18):** `lib/regions.dart` 한 곳에 서울 25개 구 + 경기 31개 시·군. `Region.id`는 공고 `region` 필드·FCM 토픽·
+저장값으로 함께 쓴다. `available: false`인 지역은 지역 선택 화면에 '준비 중'(백엔드 등록표와 테스트로 맞춤).
+**내 지역**(`services/region_prefs.dart`, 최대 3곳)은 홈·찜·알림이 같이 쓴다 — 예전엔 홈 칩과 설정 알림 지역이 따로였다.
+저장 키 `selected_regions`·`bokjiro_notif`. v1.4 설정(`selected_topics`·`selected_sources`)은 첫 실행 때 옮기고 지운다.
+
+**FCM 토픽 구독 규칙 (`FcmService.syncSubscriptions`):**
 서버는 모든 공고를 `all` + 지역 토픽에 동시 발송한다. 중복 수신을 막기 위해 앱은
-지역을 1개 이상 고른 사용자는 지역 토픽만, 고르지 않은 사용자는 `all`만 구독한다.
-알림 OFF는 `FcmService.allTopics` 17개 전부 해지. 앱 시작 시에도 저장된 설정으로 동기화.
+내 지역을 고른 사용자는 그 지역 토픽(+'전국 공고(복지로)도 받기'를 켜면 `bokjiro`)만, 고르지 않은 사용자는 `all`(서울·경기 전부)만 구독한다
+(사용자 결정 2026-11-18). 토픽이 58개라 구독 중인 목록을 `fcm_topics`에 적어 두고 바뀐 것만 구독·해지한다.
+알림 OFF는 전체 토픽 해지.
 
 ### 4.1 화면 구성 (3탭)
 
@@ -248,7 +273,8 @@ def _get_db():
 ┌─────────────────────────────┐
 │  AppBar: "어르신 알리미"  🔄 │
 ├─────────────────────────────┤
-│  [전체] [복지로] [노원구청] [도봉구청] [중랑구청] ...  ← 필터 칩 바 (가로 스크롤)
+│ 📍 노원구 · 수원시        [지역 바꾸기] │  ← v1.5: 지역 선택 화면 열기
+│  [내 지역] [전체] [복지로]                 ← 칩 3개 (예전 구청 칩 13개 가로 스크롤 대신)
 ├─────────────────────────────┤
 │                             │
 │  ┌─────────────────────┐    │
@@ -401,8 +427,11 @@ senior-welfare-app/
 │   ├── llm_judge.py               # AI 판정·요약: 규칙 필터, 프롬프트, Ollama/Gemini 호출, 결과 검사 (3.2)
 │   ├── monitoring.py              # 운영 감시: 실행 기록 + 헬스체크 (3.5)
 │   ├── log_config.py              # Cloud Logging용 JSON 로그 설정
+│   ├── sources.py                 # 출처 등록표: 출처 → 지역 코드·복지관 여부 (v1.5)
+│   ├── board_sources.py           # 범용 파서로 읽는 게시판 목록 (서울 교체 4 + 경기 52기관, v1.5)
+│   ├── board_parser.py            # 범용 게시판 목록 파서 (v1.5)
 │   ├── tls_compat.py              # 중간 인증서 누락·옛 암호화 사이트 대응 (검증은 유지)
-│   ├── certs/intermediates.pem    # 서버가 안 보내는 중간 인증서 3개 (tls_compat.py가 사용)
+│   ├── certs/intermediates.pem    # 서버가 안 보내는 중간 인증서 5개 (tls_compat.py가 사용)
 │   ├── eminwon.py                 # 새올 고시공고 공통 파서 (경기용, 파이프라인 미연결 — dry-run만)
 │   ├── requirements.txt           # Python 패키지
 │   ├── requirements-dev.txt       # 테스트 전용 (pytest, 배포 제외)
@@ -413,18 +442,21 @@ senior-welfare-app/
 ├── frontend/
 │   ├── lib/
 │   │   ├── main.dart              # 앱 진입점, 3탭 스캐폴드, FCM 딥링크
+│   │   ├── regions.dart           # 지역 목록 (서울 25·경기 31) — 지역을 다루는 모든 곳의 기준 (v1.5)
 │   │   ├── theme.dart             # SeniorTheme (전역 디자인 토큰)
 │   │   ├── models/
 │   │   │   └── welfare_notice.dart  # Firestore 데이터 모델
 │   │   ├── screens/
-│   │   │   ├── home_screen.dart       # 홈(속보) 탭 — 필터 칩 + 실시간 스트림 + 찜 버튼
+│   │   │   ├── home_screen.dart       # 홈(속보) 탭 — 내 지역 + [내 지역][전체][복지로] 칩 + 찜 버튼
+│   │   │   ├── region_picker_screen.dart # 내 지역 고르기 — 시·도 버튼 → 시·군·구 타일 (v1.5)
 │   │   │   ├── bookmarks_screen.dart  # 찜한 공고 탭 — SharedPreferences + Firestore 조회
-│   │   │   ├── settings_screen.dart   # 설정 탭 — 지역 선택 + 알림 ON/OFF
+│   │   │   ├── settings_screen.dart   # 설정 탭 — 내 지역 + 복지로 알림 + 알림 ON/OFF
 │   │   │   └── webview_screen.dart    # 공고 상세 — InApp WebView + AdMob
 │   │   ├── widgets/
 │   │   │   └── notice_card.dart     # 공고 카드 + 광고 플레이스홀더
 │   │   └── services/
-│   │       └── fcm_service.dart     # FCM 초기화, 토픽 구독 관리
+│   │       ├── fcm_service.dart     # FCM 초기화, 토픽 구독 관리
+│   │       └── region_prefs.dart    # 내 지역 설정 (홈·찜·알림 공용, v1.5)
 │   └── pubspec.yaml
 │
 ├── docs/                          # 작업 인계, 경기도 확장 조사 (gyeonggi/)
@@ -446,7 +478,7 @@ senior-welfare-app/
 | 항목 | 상태 | 비고 |
 |------|------|------|
 | Cloud Functions: `scraping_function` | ✅ 배포 완료 | asia-northeast3 |
-| Cloud Functions: `notification_function` | ✅ 배포 완료 | asia-northeast3 |
+| Cloud Functions: `notification_function` | ✅ 배포 완료 (2026-11-18 지역 코드 토픽) | asia-northeast3 |
 | Cloud Functions: `health_check_function` | ✅ 배포 완료 (2026-11-16) | 10:00·19:00 KST 스케줄 |
 | Cloud Monitoring 알림 정책 (HEALTH_ALERT → 이메일) | ✅ 설정 (2026-11-16) | 3.5 참고 |
 | 맥 로컬 수집 (launchd `com.seniorwelfare.pipeline`) | ✅ 운영 (2026-11-16~) | CLAUDE.md "로컬 수집 실행" |
@@ -454,7 +486,7 @@ senior-welfare-app/
 | Cloud Scheduler: `scraping-evening` (18:00 KST) | ⏸ PAUSED (2026-11-16) | Asia/Seoul |
 | Firestore Database | ✅ 생성 완료 | asia-northeast3 |
 | Firestore 보안 규칙 | ✅ 배포 완료 | welfare_notices 읽기 허용 |
-| Firestore 복합 인덱스 | ✅ 배포 완료 | source + timestamp |
+| Firestore 복합 인덱스 | ✅ 배포 완료 | source + timestamp, region + timestamp (2026-11-18) |
 | AdMob 앱·광고단위 등록 | ✅ 완료 | `ca-app-pub-5634467403173492/3253182704` |
 | Firebase 앱 등록 (`com.seniorwelfare.senior_welfare_app`) | ✅ 완료 | google-services.json 적용 |
 | Flutter 앱 (Android 에뮬레이터) | ✅ 정상 작동 확인 | Firestore 연동 확인 |
@@ -471,10 +503,10 @@ senior-welfare-app/
 | 항목 | 비고 |
 |------|------|
 | v1.4.1+8 출시 | 배너 광고 단위 ID 입력 → 빌드 → Play 내부 테스트에서 꺼진 상태 알림 탭 확인 → 출시 |
-| 출처 확장 | 경기 노인복지관·시니어클럽 위주 조사, 강서·동작·관악은 그 구 복지관으로 교체 조사 (`docs/수집기-현황-2026-11-16.md`) |
-| 출처 목록 한 곳으로 모으기 | 지금 7곳에 흩어짐 — 출처 확장 때 함께 (`docs/구조-테스트-점검-2026-11-18.md`) |
+| v1.5.0 (지역 선택·경기) | `v1.5-regions` 브랜치. 출시 때 맥 수집에 `GYEONGGI=1` (TODO.md) |
+| 경기 남은 출처 | 추가 확인 33곳 + 기흥(목록 날짜 암호화) (`docs/gyeonggi/gyeonggi_centers.yaml`) |
 | 보안 보강 | 함수 전용 서비스 계정, 앱 Android 키 제한, App Check (`docs/보안-비용-점검-2026-11-17.md`) |
-| 운세 기능 (v1.5.0) | `docs/HANDOFF-2026-11-16.md` |
+| 운세 기능 (v1.6 이후) | 설계 확정·구현 전 (`docs/운세-설계-2026-11-18.md`) |
 
 ---
 
@@ -488,6 +520,7 @@ senior-welfare-app/
 | `LLM_PROVIDER` | 실행 환경 | `gemini`(기본) / `ollama` — AI 판정에 쓸 모델 |
 | `OLLAMA_MODEL`, `OLLAMA_URL` | 실행 환경 | 기본 `qwen2.5:14b`, `http://localhost:11434` |
 | `SILENT_SAVE` | 실행 환경 | `1`이면 알림 없이 저장 (밀린 공고 처리용) |
+| `GYEONGGI` | 실행 환경 | `1`이면 경기 52기관도 수집 (v1.5 앱 출시 때 launchd plist에 추가) |
 | `GOOGLE_CLOUD_PROJECT` | 로컬 실행 | `senior-welfare-app` — 로컬에서 Firestore 접속 시 프로젝트 지정 |
 
 > **주의:** `.env`, `backend/.env.yaml`은 `.gitignore`에 등록되어 있음

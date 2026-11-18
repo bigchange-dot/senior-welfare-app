@@ -19,7 +19,8 @@ Claude Code가 이 프로젝트에서 작업할 때 반드시 따르는 규칙�
 
 - 백엔드: `cd backend && venv/bin/python -m pytest` (네트워크·Firestore·LLM 안 부름, pytest는 `requirements-dev.txt`)
 - 프론트엔드: `cd frontend && flutter test` → 끝나면 `git checkout -- frontend/analysis_options.yaml`
-- 판정 규칙·요약 검사·헬스체크·새올 파서·카드 레이아웃을 바꾸면 테스트도 함께 고칠 것
+- 판정 규칙·요약 검사·헬스체크·새올 파서·카드 레이아웃·게시판 파서·출처 등록표·지역 목록을 바꾸면 테스트도 함께 고칠 것
+- 게시판 출처 실제 점검(저장·AI 없음): `cd backend && venv/bin/python board_parser.py [이름 일부]`
 
 ---
 
@@ -95,6 +96,9 @@ Claude Code가 이 프로젝트에서 작업할 때 반드시 따르는 규칙�
   만료되면 **터미널 앱에서** `gcloud auth application-default login` (Claude Code `!`로는 브라우저가 안 열림)
 - 수동 실행: `cd backend && LLM_PROVIDER=ollama GOOGLE_CLOUD_PROJECT=senior-welfare-app venv/bin/python scraping_function.py`
   - 밀린 공고를 알림 없이 저장하려면 `SILENT_SAVE=1` 추가
+  - 경기 52기관까지 수집하려면 `GYEONGGI=1` 추가. **v1.5 앱 출시 전에는 켜지 않는다** (v1.4 사용자는 지역을 못 골라 경기 알림이 모두 감).
+    출시 때 launchd plist의 EnvironmentVariables에 `GYEONGGI=1`을 넣고 unload/load
+- 이 폴더가 `v1.5-regions` 브랜치일 때는 그 브랜치의 백엔드가 자동 수집에 쓰인다 — 백엔드는 테스트가 통과하는 상태로만 둘 것
 - Cloud Scheduler `scraping-morning`·`scraping-evening`은 일시정지 상태. 클라우드로 되돌리려면 `gcloud scheduler jobs resume <이름> --location=asia-northeast3`
   — Gemini 충전 필요, 그리고 `scraping_function`이 비공개(`invoker="private"`, 2026-11-17)라 스케줄러 작업에 OIDC 인증을 붙여야 함
 - ⚠️ `scraping_function` 주소로 요청을 보내면 GET·HEAD 가리지 않고 수집이 실제로 실행된다. 확인용 요청 금지
@@ -102,19 +106,15 @@ Claude Code가 이 프로젝트에서 작업할 때 반드시 따르는 규칙�
 
 ---
 
-## FCM 토픽
+## 지역·출처·FCM 토픽 (v1.5, 2026-11-18~)
 
-```
-all, bokjiro, nowon, dobong, jungnang, mapo, eunpyeong, seongdong, gangbuk
-```
-
-실제 사용 토픽은 위 목록보다 많음 — `fcm_service.dart`의 `FcmService.allTopics`(17개)가 기준.
-새 구청 추가 시 `notification_function.py`의 `SOURCE_TOPIC_MAP`, `settings_screen.dart`의 `_regions`,
-`home_screen.dart`의 `_filters`, `fcm_service.dart`의 `allTopics` 네 곳 모두 업데이트.
-2026-11-17: 강북·강서·동작·관악은 `_filters`·`_regions`에서 뺐음(수집 제외·공고 0건). `allTopics`·`SOURCE_TOPIC_MAP`에는 남김.
-되살릴 때는 `_filters`와 `_regions`에 다시 추가.
-
----
+- 지역 기준은 두 파일: 앱 `frontend/lib/regions.dart`(서울 25·경기 31, `available`), 백엔드 `backend/sources.py`(출처 → 지역 코드·복지관 여부)
+  + `backend/board_sources.py`(범용 파서로 읽는 게시판 목록). `backend/tests/test_sources.py`가 둘이 맞는지 확인
+- 지역 코드 = 공고 `region` 필드 = FCM 토픽 = 앱 저장값. 서울은 v1.4 토픽 이름 그대로(`nowon` 등), 경기는 `gg-suwon` 형식, 복지로 `bokjiro`, 전체 `all`
+- **새 출처 추가**: `sources.py`(또는 게시판이면 `board_sources.py`)에 넣기 → 그 지역 첫 출처면 `regions.dart`의 `available: true` → 테스트.
+  첫 실행분은 자동으로 알림 없이 저장됨(`system_status/source_warmup`)
+- 지역을 안 고른 사용자는 `all` = 서울·경기 전부 받음 (사용자 결정 2026-11-18)
+- 알림 함수는 문서의 `region`으로 토픽을 정하므로 등록표만 바꿀 때는 재배포 안 해도 됨
 
 ## Secret Manager
 

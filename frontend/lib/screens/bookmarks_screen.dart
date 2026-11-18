@@ -2,6 +2,8 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/welfare_notice.dart';
+import '../regions.dart';
+import '../services/region_prefs.dart';
 import '../widgets/notice_card.dart';
 import '../theme.dart';
 import 'webview_screen.dart';
@@ -16,31 +18,10 @@ class BookmarksScreen extends StatefulWidget {
   State<BookmarksScreen> createState() => BookmarksScreenState();
 }
 
-// 설정 화면의 region source(구청)를 Firestore의 실제 source 목록으로 확장.
-// home_screen.dart의 _FilterChipData.sources 매핑과 동일하게 유지해야 함.
-const Map<String, List<String>> _regionToSources = {
-  '복지로':     ['복지로'],
-  '노원구청':   ['노원구청', '수락노인복지관'],
-  '도봉구청':   ['도봉구청', '도봉노인복지관'],
-  '중랑구청':   ['중랑구청'],
-  '마포구청':   ['마포구청', '마포노인복지관'],
-  '은평구청':   ['은평구청', '은평노인복지관'],
-  '성동구청':   ['성동구청', '성동구 어르신일자리'],
-  '강북구청':   ['강북구청'],
-  '종로구청':   ['종로구청', '종로노인복지관'],
-  '중구청':     ['중구청', '약수노인복지관'],
-  '용산구청':   ['용산구청', '용산노인복지관'],
-  '서대문구청': ['서대문구청', '서대문노인복지관'],
-  '강서구청':   ['강서구청'],
-  '동작구청':   ['동작구청'],
-  '관악구청':   ['관악구청'],
-  '양천구청':   ['양천구청'],
-};
-
 class BookmarksScreenState extends State<BookmarksScreen> {
   List<WelfareNotice> _bookmarkedNotices = [];
   List<WelfareNotice> _regionNotices     = [];
-  List<String>        _selectedSources   = [];
+  List<String>        _myRegions         = [];
   bool                _isLoading         = true;
 
   @override
@@ -82,18 +63,10 @@ class BookmarksScreenState extends State<BookmarksScreen> {
   }
 
   Future<void> _loadRegionNotices() async {
-    final prefs = await SharedPreferences.getInstance();
-    _selectedSources = prefs.getStringList('selected_sources') ?? [];
+    // v1.5: 출처 이름 목록 대신 공고의 region 필드로 찾는다 (내 지역은 최대 3곳)
+    _myRegions = RegionPrefs.selected.value;
 
-    // 빈 문자열('전체') 제거 + 구청 → 구청+복지관 매핑으로 확장
-    // 예: ['도봉구청'] → ['도봉구청', '도봉노인복지관']
-    final sources = _selectedSources
-        .where((s) => s.isNotEmpty)
-        .expand((s) => _regionToSources[s] ?? [s])
-        .toSet()
-        .toList();
-
-    if (sources.isEmpty) {
+    if (_myRegions.isEmpty) {
       _regionNotices = [];
       return;
     }
@@ -101,7 +74,7 @@ class BookmarksScreenState extends State<BookmarksScreen> {
     try {
       final snapshot = await FirebaseFirestore.instance
           .collection('welfare_notices')
-          .where('source', whereIn: sources)
+          .where('region', whereIn: _myRegions)
           .orderBy('timestamp', descending: true)
           .limit(30)
           .get();
@@ -177,21 +150,19 @@ class BookmarksScreenState extends State<BookmarksScreen> {
             ),
 
           // ── 내 지역 공고 섹션 ────────────────────────
-          if (_selectedSources.where((s) => s.isNotEmpty).isNotEmpty) ...[
+          if (_myRegions.isNotEmpty) ...[
             const SliverToBoxAdapter(
               child: Divider(height: 32, thickness: 6, color: Color(0xFFEEEEEE)),
             ),
             _SectionHeader(
               icon:  Icons.location_on,
               color: SeniorTheme.primary,
-              title: '${_selectedSources.where((s) => s.isNotEmpty).join(' · ')} 공고',
+              title: '${regionNames(_myRegions)} 공고',
               count: _regionNotices.length,
             ),
             if (_regionNotices.isEmpty)
               SliverToBoxAdapter(
-                child: _EmptyRegion(
-                  sources: _selectedSources.where((s) => s.isNotEmpty).toList(),
-                ),
+                child: _EmptyRegion(names: regionNames(_myRegions)),
               )
             else
               SliverList(
@@ -209,7 +180,7 @@ class BookmarksScreenState extends State<BookmarksScreen> {
               ),
           ],
 
-          if (_selectedSources.where((s) => s.isNotEmpty).isEmpty)
+          if (_myRegions.isEmpty)
             const SliverToBoxAdapter(child: _NoRegionBanner()),
 
           // 하단 여백 (BottomNavigationBar 가림 방지)
@@ -299,15 +270,15 @@ class _EmptyBookmarks extends StatelessWidget {
 
 // ── 지역 공고 없을 때 ───────────────────────
 class _EmptyRegion extends StatelessWidget {
-  final List<String> sources;
-  const _EmptyRegion({required this.sources});
+  final String names;
+  const _EmptyRegion({required this.names});
 
   @override
   Widget build(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 24, horizontal: 32),
       child: Text(
-        '${sources.join(' · ')} 최신 공고가 없습니다.\n아래로 당겨 새로고침 해보세요.',
+        '$names 최신 공고가 없습니다.\n아래로 당겨 새로고침 해보세요.',
         style: const TextStyle(
           fontSize: SeniorTheme.fontMD,
           color:    SeniorTheme.textSecond,
@@ -340,7 +311,7 @@ class _NoRegionBanner extends StatelessWidget {
           const SizedBox(width: 14),
           const Expanded(
             child: Text(
-              '설정 탭에서 내 지역을 선택하면\n지역 공고를 여기서 바로 볼 수 있어요.',
+              '홈이나 설정 탭에서 내 지역을 고르면\n지역 공고를 여기서 바로 볼 수 있어요.',
               style: TextStyle(
                 fontSize: SeniorTheme.fontMD,
                 color:    SeniorTheme.textPrimary,

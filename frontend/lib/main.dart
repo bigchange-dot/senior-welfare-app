@@ -11,6 +11,7 @@ import 'screens/home_screen.dart';
 import 'screens/settings_screen.dart';
 import 'screens/webview_screen.dart';
 import 'services/fcm_service.dart';
+import 'services/region_prefs.dart';
 import 'theme.dart';
 
 import 'package:flutter/foundation.dart';
@@ -20,6 +21,13 @@ import 'firebase_options.dart';
 /// 앱 최상단 진입점
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // 내 지역 설정 읽기 (v1.4 설정이 있으면 옮김) — FCM 토픽 동기화보다 먼저
+  try {
+    await RegionPrefs.load();
+  } catch (e) {
+    debugPrint('내 지역 설정 읽기 실패 (지역 없음으로 시작): $e');
+  }
 
   try {
     if (kIsWeb) {
@@ -34,7 +42,7 @@ void main() async {
       FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
 
       // FCM 서비스 초기화 — 기다리지 않는다 (2026-11-17).
-      // 토픽 17개 구독을 기다리면 첫 화면이 늦게 뜨고, 오프라인이면 더 늦어진다.
+      // 토픽 구독을 기다리면 첫 화면이 늦게 뜨고, 오프라인이면 더 늦어진다.
       // 꺼진 상태 알림 탭 처리는 FcmService가 첫 화면 뒤로 미뤄 처리한다.
       unawaited(FcmService.instance.initialize());
 

@@ -4,6 +4,9 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../regions.dart';
+import 'region_prefs.dart';
+
 /// FCM 수신 & Deep Linking 처리 서비스
 /// architecture.md 5.3 원칙:
 /// - 앱 종료 상태 알림 클릭 → 해당 공고 WebView로 즉시 이동
@@ -23,9 +26,12 @@ class FcmService {
 
   StreamSubscription? _onMessageOpenedSub;
 
-  /// 서버(notification_function.py SOURCE_TOPIC_MAP)와 맞춰야 하는 전체 토픽 목록.
-  /// 새 구청 추가 시 settings_screen.dart의 _regions와 함께 여기도 추가할 것.
-  static const List<String> allTopics = [
+  /// 지금 구독 중인 토픽을 기기에 적어 둔다 — 바뀐 것만 구독·해지하려고 (v1.5).
+  /// 토픽이 58개(서울 25 + 경기 31 + all + 복지로)라 매번 전부 해지하면 앱 시작이 느려진다
+  static const String _subscribedKey = 'fcm_topics';
+
+  /// v1.4까지 쓰던 토픽 — 적어 둔 목록이 없는(업데이트 직후) 기기는 이 중 무엇을 구독했는지 모른다
+  static const List<String> _legacyTopics = [
     'all', 'bokjiro', 'nowon', 'dobong', 'jungnang', 'mapo', 'eunpyeong',
     'seongdong', 'gangbuk', 'jongno', 'junggu', 'yongsan', 'seodaemun',
     'gangseo', 'dongjak', 'gwanak', 'yangcheon',
@@ -121,8 +127,8 @@ class FcmService {
   /// 저장된 설정에 맞춰 토픽 구독을 맞춤 (앱 시작·지역 변경·알림 ON 시 호출)
   ///
   /// 중복 알림 방지: 서버는 모든 공고를 `all`과 지역 토픽에 동시 발송하므로
-  /// 지역을 하나라도 고른 사용자는 `all`을 해지하고 지역 토픽만 구독한다.
-  /// 지역을 고르지 않은 사용자만 `all`을 구독한다.
+  /// 지역을 하나라도 고른 사용자는 `all`을 해지하고 지역 토픽(+복지로)만 구독한다.
+  /// 지역을 고르지 않은 사용자만 `all`(서울·경기 전부)을 구독한다.
   Future<void> syncSubscriptions() async {
     final fcm = _fcm;
     if (fcm == null) return;
@@ -134,44 +140,52 @@ class FcmService {
         await unsubscribeAll();
         return;
       }
-      final selected = (prefs.getStringList('selected_topics') ?? [])
-          .where((t) => t.isNotEmpty)
-          .toSet();
-      // 설정 화면의 '전체' 칩은 source·topic이 빈 문자열로 저장됨 → all 구독 의사로 해석
-      final wantsAll = (prefs.getStringList('selected_sources') ?? []).contains('');
-      final wanted = selected.isEmpty || wantsAll ? {...selected, 'all'} : selected;
+      final wanted = RegionPrefs.wantedTopics(
+        regions: RegionPrefs.selected.value,
+        bokjiro: RegionPrefs.bokjiroNotif.value,
+      );
+      final previous = (prefs.getStringList(_subscribedKey) ?? _legacyTopics).toSet();
 
-      // 토픽별로 개별 예외 처리: 하나가 실패해도 나머지 구독/해지는 계속 진행
-      for (final topic in allTopics) {
+      // 토픽별로 개별 예외 처리: 하나가 실패해도 나머지는 계속. 해지에 실패한 토픽은 다음에 다시 시도
+      final failedUnsub = <String>{};
+      for (final topic in previous.difference(wanted)) {
         try {
-          if (wanted.contains(topic)) {
-            await fcm.subscribeToTopic(topic);
-          } else {
-            await fcm.unsubscribeFromTopic(topic);
-          }
+          await fcm.unsubscribeFromTopic(topic);
         } catch (e) {
-          debugPrint('FCM 토픽 처리 실패 [$topic]: $e');
+          failedUnsub.add(topic);
+          debugPrint('FCM 토픽 해지 실패 [$topic]: $e');
         }
       }
+      for (final topic in wanted) {
+        try {
+          await fcm.subscribeToTopic(topic);
+        } catch (e) {
+          debugPrint('FCM 토픽 구독 실패 [$topic]: $e');
+        }
+      }
+      await prefs.setStringList(_subscribedKey, {...wanted, ...failedUnsub}.toList());
       debugPrint('✅ FCM 토픽 동기화: ${wanted.join(', ')}');
     } catch (e) {
       debugPrint('FcmService syncSubscriptions 오류: $e');
     }
   }
 
-  /// 모든 알림 구독 해지 (알림 OFF)
+  /// 모든 알림 구독 해지 (알림 OFF) — 드문 동작이라 목록 전체를 해지해 확실히 끈다
   Future<void> unsubscribeAll() async {
     final fcm = _fcm;
     if (fcm == null) return;
 
-    for (final topic in allTopics) {
+    final topics = {...allTopics, ..._legacyTopics};
+    for (final topic in topics) {
       try {
         await fcm.unsubscribeFromTopic(topic);
       } catch (e) {
         debugPrint('FCM 토픽 해지 실패 [$topic]: $e');
       }
     }
-    debugPrint('🚫 모든 FCM 토픽 해지 (${allTopics.length}개)');
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setStringList(_subscribedKey, const []);
+    debugPrint('🚫 모든 FCM 토픽 해지 (${topics.length}개)');
   }
 
   void dispose() {

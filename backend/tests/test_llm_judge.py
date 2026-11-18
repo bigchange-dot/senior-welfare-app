@@ -154,3 +154,39 @@ def test_judge_notice_error_recorded(monkeypatch):
     J.state["last_error"] = ""
     assert J.judge_notice(TITLE, BODY, "노원구청") == "ERROR"
     assert "ollama" in J.state["last_error"]
+
+
+# ── 2026-11-18 경기 점검에서 찾은 것 ─────────────────────────
+@pytest.mark.parametrize("title, summary", [
+    ("2026년 이천시 청미노인복지관 10월 촉탁의 진료 참여자 모집", "🩺 그림책 마실 참여자 모집"),   # 다른 글을 요약
+    ("2026년 10월 후원내역", "🩺 치매 조기 검진 참여자 모집 · 11월 18일까지"),
+    ("김포북부 시니어 페스티벌", "💼 2027년도 노인일자리 및 사회활동지원사업 참여자 모집"),
+])
+def test_summary_of_another_post_falls_back_to_title(title, summary):
+    assert J.finalize(_pass(summary), title, f"{title} {summary}", TODAY) == J.fallback_summary(title)
+
+
+@pytest.mark.parametrize("title, summary", [
+    ("구강교육 참여자 모집안내", "🦷 구강건강교육 참여자 모집"),                       # 두 글자 조각이 겹침
+    ("2026년 장애노인인식개선사업 장애인식개선교육 참여자 모집", "📢 장애노인인식개선교육 참여자 모집"),
+    ("11월 가정통신문", "📢 11월 프로그램 및 식단 안내"),                              # 정기 소식은 본문 요약이 맞음
+    ("[사회교육] 2026년 11월 온라인 학습정보 제공", "🏃 온라인 코어운동 강좌 신청 가능"),
+])
+def test_summary_on_same_topic_kept(title, summary):
+    assert J.summary_matches_title(summary, title)
+
+
+@pytest.mark.parametrize("summary, expired", [
+    ("성평등 의사소통 교육 참여자 모집 · 10.27까지", True),     # 점 표기 마감 (경기 점검에서 통과했던 것)
+    ("자율방범대 3기 참여자 모집 · ~10.22", True),
+    ("강좌 접수 · 11.20(금)", False),
+])
+def test_dotted_deadlines(summary, expired):
+    out = J.finalize(_pass(summary), summary, summary, TODAY)
+    assert (out == "SKIP") == expired
+
+
+def test_recruitment_completed_title_is_rule_skipped():
+    assert J.rule_skip_reason("[모집완료]11월 이미용 신청 모집") == "마감"
+    assert J.rule_skip_reason("(접수완료) 스마트폰 교실") == "마감"
+    assert J.rule_skip_reason("11월 이미용 신청 모집") is None

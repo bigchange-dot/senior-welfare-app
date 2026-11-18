@@ -14,6 +14,7 @@ from dotenv import load_dotenv
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), '..', '.env'))
 
 from log_config import configure_logging
+import sources
 configure_logging()
 logger = logging.getLogger(__name__)
 
@@ -30,35 +31,7 @@ def _get_db():
         _db = firestore.client()
     return _db
 
-# 출처별 FCM 토픽 매핑
-SOURCE_TOPIC_MAP = {
-    "복지로":             "bokjiro",
-    "성동구청":           "seongdong",
-    "성동구 어르신일자리": "seongdong",
-    "강북구청":           "gangbuk",
-    "노원구청":           "nowon",
-    "도봉구청":           "dobong",
-    "중랑구청":           "jungnang",
-    "마포구청":           "mapo",
-    "은평구청":           "eunpyeong",
-    "종로구청":           "jongno",
-    "중구청":             "junggu",
-    "용산구청":           "yongsan",
-    "서대문구청":         "seodaemun",
-    "강서구청":           "gangseo",
-    "동작구청":           "dongjak",
-    "관악구청":           "gwanak",
-    "양천구청":           "yangcheon",
-    # 노인복지관 (구청 토픽에 통합, 접속 가능한 6개)
-    "수락노인복지관":     "nowon",
-    "마포노인복지관":     "mapo",
-    "도봉노인복지관":     "dobong",
-    "은평노인복지관":     "eunpyeong",
-    "종로노인복지관":     "jongno",
-    "약수노인복지관":     "junggu",
-    "용산노인복지관":     "yongsan",
-    "서대문노인복지관":   "seodaemun",
-}
+# 출처 → 지역 토픽은 sources.py 등록표로 옮김 (v1.5, sources.region_of). 서울 토픽 이름은 예전 그대로
 
 
 def send_notification_for_doc(doc_id: str, doc_data: dict) -> bool:
@@ -84,7 +57,8 @@ def send_notification_for_doc(doc_id: str, doc_data: dict) -> bool:
 
     # 발송할 토픽 목록 (전체 + 지역별)
     topics = ["all"]
-    region_topic = SOURCE_TOPIC_MAP.get(source)
+    # 문서에 저장된 지역 코드를 먼저 쓴다 — 수집은 맥에서 돌아 클라우드에 배포된 등록표보다 새로울 수 있음
+    region_topic = doc_data.get("region") or sources.region_of(source)
     if region_topic:
         topics.append(region_topic)
 

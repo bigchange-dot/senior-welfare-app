@@ -63,7 +63,8 @@ RULE_SKIP = [
         r"기간제\s*근로자|종사자|치료사|돌봄교사|청소\s*인부)"
         r"(\s*\([^)]{0,40}\))?\s*(대체\s*인력\s*)?(공개\s*)?(채용|모집)")),
     # "[접수마감] 구강교육 참여자 모집"처럼 제목에 마감 표시가 붙은 글 ("마감 임박"은 통과)
-    ("마감", re.compile(r"[\[\(【]\s*(접수\s*|모집\s*)?마감\s*[\]\)】]|모집\s*마감(?!\s*임박)|접수\s*마감\s*(안내|되었|됨)|조기\s*마감")),
+    ("마감", re.compile(r"[\[\(【]\s*(접수\s*|모집\s*)?마감\s*[\]\)】]|모집\s*마감(?!\s*임박)|접수\s*마감\s*(안내|되었|됨)|조기\s*마감"
+                      r"|[\[\(【]\s*(모집|접수|신청)\s*완료\s*[\]\)】]")),   # "[모집완료]11월 이미용 신청" (2026-11-18)
 ]
 # 결과 발표라도 새로 신청할 수 있으면 LLM 판정으로 넘긴다
 RULE_KEEP = re.compile(r"추가\s*(접수|모집|신청)|잔여\s*(석|인원)|재\s*모집")
@@ -233,6 +234,42 @@ _CJK_RE    = re.compile(r"[一-鿿]")
 _HANGUL_RE = re.compile(r"[가-힣]")
 _NUM_RE    = re.compile(r"\d+")
 _LATIN_RE  = re.compile(r"[A-Za-z]{3,}")
+
+# 요약이 제목과 같은 글을 말하는지 (2026-11-18 경기 점검: 상세 페이지에 다른 글이 섞인 사이트에서
+# '촉탁의 진료 참여자 모집'이 '그림책 마실 참여자 모집'으로 요약됨 — 숫자 검사로는 못 거름)
+_GENERIC_WORDS = {
+    "참여자", "참가자", "모집", "안내", "신청", "접수", "프로그램", "운영", "공고", "알림", "공지", "진행", "개최", "실시",
+    "대상", "어르신", "노인", "관련", "참여", "참가", "가능", "오픈", "시작", "예정", "일정", "변경", "추가", "무료", "지원",
+    "사업", "회원", "이용", "선착순", "마감", "당일", "매주", "희망자", "신청자",
+}
+_INSTITUTION_RE = re.compile(r"(복지관|시니어클럽|센터|구청|시청|군청)$")
+_WORD_RE = re.compile(r"[가-힣A-Za-z]{2,}")
+_PARTICLE_RE = re.compile(r"(을|를|이|가|은|는|의|에|에서|로|으로|와|과|도|만|까지)$")
+# 제목만으로 내용을 알 수 없는 정기 소식 — 본문을 요약하는 게 맞다 (가정통신문·월간권익지 등)
+_PERIODIC_TITLE_RE = re.compile(r"통신문|소식지|월간|권익지|뉴스레터|웹진|일정표|식단|학습정보|정보\s*제공")
+
+
+def _topic_words(text: str) -> set[str]:
+    words = set()
+    for w in _WORD_RE.findall(text):
+        w = _PARTICLE_RE.sub("", w)
+        if len(w) >= 2 and w not in _GENERIC_WORDS and not _INSTITUTION_RE.search(w):
+            words.add(w)
+    return words
+
+
+def summary_matches_title(summary: str, title: str) -> bool:
+    """요약과 제목이 흔한 말·기관 이름을 빼고도 같은 낱말(또는 두 글자 조각 2개 이상)을 나누는지.
+    저장된 407건으로 재 보니 걸리는 건 실제로 엉뚱한 요약 1건뿐이었다 (2026-11-18)"""
+    if _PERIODIC_TITLE_RE.search(title):
+        return True
+    s, t = _topic_words(summary), _topic_words(title)
+    if not s or not t:
+        return True
+    if any(w in title for w in s) or any(w in summary for w in t):
+        return True
+    bigrams = lambda ws: {w[i:i + 2] for w in ws for i in range(len(w) - 1)}
+    return len(bigrams(s) & bigrams(t)) >= 2
 _EMOJI_RE  = re.compile(r"^[\U0001F300-\U0001FAFF☀-➿⭐⭕]")
 
 
@@ -290,11 +327,22 @@ def is_valid_summary(summary: str, title: str, content: str) -> bool:
     # 제목·본문에 없는 영문 단어 (모델이 영어로 새는 경우)
     if {w.lower() for w in _LATIN_RE.findall(summary)} - {w.lower() for w in _LATIN_RE.findall(source_text)}:
         return False
+    # 제목과 다른 글을 요약함 (상세 페이지에 다른 글이 섞인 경우)
+    if not summary_matches_title(summary, title):
+        return False
     return True
 
 
-# 요약 속 날짜: "11/9", "10월 28일", 범위 끝 "~30일"(앞 날짜의 월을 이어 씀). "2.5단계" 같은 소수와 헷갈려 "11.12"는 읽지 않음
-_DATE_TOKEN_RE = re.compile(r"(\d{1,2})\s*월\s*(\d{1,2})\s*일|(?<![\d./])(\d{1,2})\s*/\s*(\d{1,2})(?![\d./])|~\s*(\d{1,2})\s*일")
+# 요약 속 날짜: "11/9", "10월 28일", 범위 끝 "~30일"(앞 날짜의 월을 이어 씀).
+# 점 표기 "10.27"은 "2.5단계" 같은 소수와 헷갈려 '까지'·'('·'~'가 붙거나 '~' 뒤에 올 때만 날짜로 읽는다
+# (2026-11-18 경기 점검: "참여자 모집 · 10.27까지"가 11/18에 통과했음)
+_DATE_TOKEN_RE = re.compile(
+    r"(\d{1,2})\s*월\s*(\d{1,2})\s*일"
+    r"|(?<![\d./])(\d{1,2})\s*/\s*(\d{1,2})(?![\d./])"
+    r"|~\s*(\d{1,2})\s*일"
+    r"|(?<![\d.])(\d{1,2})\.(\d{1,2})(?=\s*(?:까지|\(|~))"
+    r"|(?<=~)\s*(\d{1,2})\.(\d{1,2})(?![\d.])"
+)
 
 
 def latest_date_in(text: str, today: datetime) -> datetime | None:
@@ -305,7 +353,11 @@ def latest_date_in(text: str, today: datetime) -> datetime | None:
             month, day = int(m.group(1)), int(m.group(2))
         elif m.group(3):
             month, day = int(m.group(3)), int(m.group(4))
-        elif month:
+        elif m.group(6):
+            month, day = int(m.group(6)), int(m.group(7))
+        elif m.group(8):
+            month, day = int(m.group(8)), int(m.group(9))
+        elif month and m.group(5):
             day = int(m.group(5))
         else:
             continue

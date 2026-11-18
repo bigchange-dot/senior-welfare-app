@@ -6,6 +6,8 @@ class WelfareNotice {
   final String   title;
   final String   aiSummary;
   final String   source;
+  /// 지역 코드 (lib/regions.dart의 Region.id, 복지로는 'bokjiro'). v1.5 이전 문서는 백필 전까지 빈 값
+  final String   region;
   final String   url;
   final DateTime timestamp;
   final bool     isNotified;
@@ -15,6 +17,7 @@ class WelfareNotice {
     required this.title,
     required this.aiSummary,
     required this.source,
+    this.region = '',
     required this.url,
     required this.timestamp,
     required this.isNotified,
@@ -28,6 +31,7 @@ class WelfareNotice {
       title:       data['title']       as String?  ?? '',
       aiSummary:   data['ai_summary']  as String?  ?? '',
       source:      data['source']      as String?  ?? '',
+      region:      data['region']      as String?  ?? '',
       url:         data['url']         as String?  ?? '',
       timestamp:   (data['timestamp']  as Timestamp?)?.toDate() ?? DateTime.now(),
       isNotified:  data['is_notified'] as bool?    ?? false,
@@ -39,6 +43,7 @@ class WelfareNotice {
     'title':       title,
     'ai_summary':  aiSummary,
     'source':      source,
+    'region':      region,
     'url':         url,
     'timestamp':   Timestamp.fromDate(timestamp),
     'is_notified': isNotified,

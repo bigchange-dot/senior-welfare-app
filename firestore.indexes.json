@@ -7,6 +7,14 @@
                 { "fieldPath": "source", "order": "ASCENDING" },
                 { "fieldPath": "timestamp", "order": "DESCENDING" }
             ]
+        },
+        {
+            "collectionGroup": "welfare_notices",
+            "queryScope": "COLLECTION",
+            "fields": [
+                { "fieldPath": "region", "order": "ASCENDING" },
+                { "fieldPath": "timestamp", "order": "DESCENDING" }
+            ]
         }
     ],
     "fieldOverrides": []

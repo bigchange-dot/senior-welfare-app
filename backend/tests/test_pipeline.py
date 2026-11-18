@@ -58,7 +58,9 @@ def pipeline(monkeypatch):
     monkeypatch.setattr(sf, "mark_skipped", lambda *a: None)
     monkeypatch.setattr(sf, "fetch_detail_content", lambda url, source, title="": "본문")
     saved = []
-    monkeypatch.setattr(sf, "save_to_firestore", lambda t, s, src, url: saved.append((t, s)))
+    monkeypatch.setattr(sf, "save_to_firestore", lambda t, s, src, url, silent=False: saved.append((t, s)))
+    # 게시판 출처(board_sources)도 네트워크를 부르지 않게
+    monkeypatch.setattr(sf.board_parser, "scrape_board", lambda *a, **k: [])
 
     names = [n for n in sf._run_pipeline.__code__.co_names if n.startswith("scrape_") or n == "fetch_bokjiro_api"]
     for n in names:
@@ -120,3 +122,46 @@ def test_error_collector_removed_after_run(pipeline):
     before = len(logging.getLogger().handlers)
     sf.run_scraping_pipeline()
     assert len(logging.getLogger().handlers) == before
+
+
+# ── 저장 (v1.5: 지역 코드) ─────────────────────────────────
+def test_save_adds_region(monkeypatch):
+    db = FakeDB()
+    monkeypatch.setattr(sf, "_get_db", lambda: db)
+    doc_id = sf.save_to_firestore("어르신 스마트폰 교실", "📱 스마트폰 교실 모집", "수락노인복지관", "https://x.or.kr/1")
+    doc = db.collection(sf.FIREBASE_COLLECTION).document(doc_id).get().to_dict()
+    assert (doc["region"], doc["province"]) == ("nowon", "seoul")
+
+
+def test_save_unknown_source_keeps_notice(monkeypatch, caplog):
+    db = FakeDB()
+    monkeypatch.setattr(sf, "_get_db", lambda: db)
+    with caplog.at_level(logging.WARNING):
+        doc_id = sf.save_to_firestore("제목", "요약", "새로운복지관", "https://y.or.kr/1")
+    doc = db.collection(sf.FIREBASE_COLLECTION).document(doc_id).get().to_dict()
+    assert doc["region"] == "" and doc["source"] == "새로운복지관"
+    assert "등록표에 없는 출처" in caplog.text
+
+
+# ── 새 출처 첫 실행은 알림 없이 (v1.5) ─────────────────────────
+def test_new_source_saved_silently_then_recorded(monkeypatch):
+    db = FakeDB()
+    db.collection("system_status").document("source_warmup").set({"sources": ["도봉노인복지관"]})
+    monkeypatch.setattr(sf, "_get_db", lambda: db)
+    monkeypatch.setattr(sf, "is_duplicate", lambda url: False)
+    monkeypatch.setattr(sf, "is_skipped", lambda url: False)
+    monkeypatch.setattr(sf, "fetch_detail_content", lambda url, source, title="": "본문")
+    monkeypatch.setattr(sf.llm_judge, "judge_notice", lambda *a: "📢 요약")
+    calls = []
+    monkeypatch.setattr(sf, "save_to_firestore", lambda t, s, src, url, silent=False: calls.append((src, silent)))
+    monkeypatch.setattr(sf.board_parser, "scrape_board", lambda *a, **k: [])
+    for n in [n for n in sf._run_pipeline.__code__.co_names if n.startswith("scrape_") or n == "fetch_bokjiro_api"]:
+        monkeypatch.setattr(sf, n, lambda: [])
+    monkeypatch.setattr(sf, "scrape_dobong_welfare", lambda: [
+        {"title": "어르신 건강교실 모집", "url": "a1", "source": "도봉노인복지관"},
+        {"title": "어르신 스마트폰 교실 모집", "url": "a2", "source": "강서노인종합복지관"},
+    ])
+    sf._run_pipeline({"source_counts": {}, "llm_calls": 0, "llm_errors": 0})
+    assert sorted(calls) == [("강서노인종합복지관", True), ("도봉노인복지관", False)]
+    warm = db.collection("system_status").document("source_warmup").get().to_dict()["sources"]
+    assert set(warm) == {"도봉노인복지관", "강서노인종합복지관"}

@@ -33,10 +33,15 @@ BOKJIRO_MAX_NEW_PER_RUN = 2               # 복지로 신규 저장 상한 (알�
 # 1이면 알림 없이 저장 (is_notified=True로 저장 → notification_function이 건너뜀).
 # 장애 뒤 밀린 공고를 한꺼번에 처리할 때 알림 폭주를 막는 용도
 SILENT_SAVE = os.getenv("SILENT_SAVE", "") == "1"
+# 경기 출처 수집 (v1.5). 앱 v1.5 출시 전에 켜면 지역을 못 고르는 v1.4 사용자에게 경기 공고 알림이 간다
+GYEONGGI = os.getenv("GYEONGGI", "") == "1"
 
 from log_config import configure_logging
 from monitoring import ErrorCollector, record_pipeline_run
+import board_parser
+import board_sources
 import llm_judge
+import sources
 import tls_compat
 configure_logging()
 tls_compat.install_ca_bundle()   # 중간 인증서 누락 사이트(중구청·성동구청 등) 검증용 번들
@@ -101,19 +106,26 @@ def mark_skipped(title: str, source: str, url: str) -> None:
     })
 
 
-def save_to_firestore(title: str, ai_summary: str, source: str, url: str) -> str:
-    """유효한 공고를 Firestore에 저장하고 Document ID를 반환."""
+def save_to_firestore(title: str, ai_summary: str, source: str, url: str, silent: bool = False) -> str:
+    """유효한 공고를 Firestore에 저장하고 Document ID를 반환.
+
+    region·province(v1.5): 앱은 출처 이름 목록 대신 이 지역 코드로 공고를 찾는다 (sources.py)."""
     doc_id  = make_doc_id(url)
     doc_ref = _get_db().collection(FIREBASE_COLLECTION).document(doc_id)
+    region  = sources.region_of(source)
+    if region is None:
+        logger.warning(f"⚠️ 등록표에 없는 출처 — 지역 없이 저장: {source} (sources.py에 추가할 것)")
     doc_ref.set({
         "title":       title,
         "ai_summary":  ai_summary,
         "source":      source,
+        "region":      region or "",
+        "province":    sources.province_of(region) or "",
         "url":         url,
         "timestamp":   datetime.now(timezone.utc),
-        "is_notified": SILENT_SAVE,   # True면 알림 함수가 발송을 건너뜀
+        "is_notified": SILENT_SAVE or silent,   # True면 알림 함수가 발송을 건너뜀
     })
-    logger.info(f"✅ 저장 완료{'(알림 없음)' if SILENT_SAVE else ''}: [{source}] {ai_summary}")
+    logger.info(f"✅ 저장 완료{'(알림 없음)' if SILENT_SAVE or silent else ''}: [{source}] {ai_summary}")
     return doc_id
 
 
@@ -191,11 +203,7 @@ def fetch_detail_content(url: str, source: str, title: str = "") -> str:
         return ""
 
 
-WELFARE_CENTER_SOURCES = {
-    "수락노인복지관", "마포노인복지관", "도봉노인복지관", "은평노인복지관",
-    "종로노인복지관", "약수노인복지관", "용산노인복지관", "서대문노인복지관",
-    "성동구 어르신일자리",
-}
+# 복지관 출처 목록은 sources.py 등록표로 옮김 (v1.5, sources.is_center)
 
 
 # ─────────────────────────────────────────────
@@ -630,69 +638,6 @@ def scrape_seodaemun() -> list[dict]:
 
 
 # ─────────────────────────────────────────────
-# Track A-11f: 강서구청 공지사항
-# URL: https://www.gangseo.seoul.kr/gs020502
-# 링크 형식: /gs020502/319334?... (절대경로) — 표준 헬퍼 사용
-# 확인: 2026-05-06 ✅ 10행 수집
-# ─────────────────────────────────────────────
-def scrape_gangseo() -> list[dict]:
-    return _scrape_seoul_board(
-        "https://www.gangseo.seoul.kr/gs020502",
-        "🏢 강서구청", "https://www.gangseo.seoul.kr", limit=15
-    )
-
-
-# ─────────────────────────────────────────────
-# Track A-11g: 동작구청 공지사항
-# URL: https://www.dongjak.go.kr/portal/bbs/B0001396/list.do?menuNo=201658
-# 링크 형식: /portal/bbs/B0001396/view.do?nttId=...&menuNo=201658 (절대경로)
-# 확인: 2026-05-06 ✅ 10행 수집
-# ─────────────────────────────────────────────
-def scrape_dongjak() -> list[dict]:
-    return _scrape_seoul_board(
-        "https://www.dongjak.go.kr/portal/bbs/B0001396/list.do?menuNo=201658",
-        "🏢 동작구청", "https://www.dongjak.go.kr", limit=15
-    )
-
-
-# ─────────────────────────────────────────────
-# Track A-11h: 관악구청 공지사항
-# URL: https://www.gwanak.go.kr/site/365/bbs/list.do?cbIdx=302
-# 링크 형식: onclick="doBbsFView('302','198737','16010100','198737')"
-#   → /site/365/bbs/view.do?cbIdx=302&bcIdx=198737 (Gbn은 menuId, parentSeq는 동일)
-# 확인: 2026-05-06 ✅
-# ─────────────────────────────────────────────
-def scrape_gwanak() -> list[dict]:
-    list_url = "https://www.gwanak.go.kr/site/365/bbs/list.do?cbIdx=302"
-    label    = "🏢 관악구청"
-    articles = []
-    try:
-        res = requests.get(list_url, headers=HEADERS, timeout=15)
-        res.raise_for_status()
-        soup = BeautifulSoup(res.text, "lxml")
-        rows = soup.select("table tbody tr")
-        logger.info(f"{label}: {len(rows)}개 행 발견")
-        for row in rows[:15]:
-            try:
-                a = row.select_one("td.title a, td.subject a")
-                if not a:
-                    continue
-                title = a.get_text(strip=True)
-                onclick = a.get("onclick", "")
-                m = re.search(r"doBbsFView\(\s*'(\d+)'\s*,\s*'(\d+)'", onclick)
-                if not (title and m):
-                    continue
-                cb_idx, bc_idx = m.group(1), m.group(2)
-                detail_url = f"https://www.gwanak.go.kr/site/365/bbs/view.do?cbIdx={cb_idx}&bcIdx={bc_idx}"
-                articles.append({"title": title, "url": detail_url, "content": "", "source": "관악구청"})
-            except Exception as e:
-                logger.warning(f"⚠️ {label} 행 파싱 오류: {e}")
-    except Exception as e:
-        logger.error(f"❌ {label} 스크래핑 오류: {e}")
-    return articles
-
-
-# ─────────────────────────────────────────────
 # Track A-11i: 양천구청 공지사항
 # URL: https://www.yangcheon.go.kr/site/yangcheon/ex/bbs/List.do?cbIdx=254
 # 링크 형식: 관악과 동일한 doBbsFView() — 다만 상세 경로는 ex/bbs/View.do
@@ -913,6 +858,48 @@ def scrape_eunpyeong_welfare() -> list[dict]:
 
 
 # ─────────────────────────────────────────────
+# 게시판 출처 (범용 목록 파서, v1.5)
+# ─────────────────────────────────────────────
+def _board_scraper(name: str, urls: list[str]):
+    """board_sources의 출처 하나 → 파이프라인 스크래퍼 함수 (실행 기록에 이름이 보이게 __name__ 지정)"""
+    labels = board_sources.BOARD_LABELS.get(name)
+    def run() -> list[dict]:
+        return board_parser.scrape_board(urls, name, HEADERS, labels=labels)
+    run.__name__ = f"board:{name}"
+    return run
+
+
+def _json_scraper(name: str, cfg: dict):
+    def run() -> list[dict]:
+        return board_parser.scrape_json_board(cfg, name, HEADERS)
+    run.__name__ = f"board:{name}"
+    return run
+
+
+# 새 출처 첫 실행은 알림 없이 저장 — 출처를 붙인 날 그동안 밀린 공고가 한꺼번에 알림으로 나가지 않게 (v1.5)
+WARMUP_DOC = ("system_status", "source_warmup")
+
+
+def _load_warm_sources() -> set[str]:
+    """한 번 이상 수집을 마친 출처 이름. 문서가 없으면 빈 집합 → 이번 실행은 전부 무음 (안전한 쪽)"""
+    try:
+        snap = _get_db().collection(WARMUP_DOC[0]).document(WARMUP_DOC[1]).get()
+        return set((snap.to_dict() or {}).get("sources", [])) if snap.exists else set()
+    except Exception as e:
+        logger.warning(f"⚠️ 출처 warm-up 기록 읽기 실패 — 이번 실행은 전부 무음: {e}")
+        return set()
+
+
+def _save_warm_sources(names: set[str]) -> None:
+    try:
+        _get_db().collection(WARMUP_DOC[0]).document(WARMUP_DOC[1]).set({
+            "sources": sorted(names), "updated_at": datetime.now(timezone.utc),
+        })
+    except Exception as e:
+        logger.warning(f"⚠️ 출처 warm-up 기록 저장 실패: {e}")
+
+
+# ─────────────────────────────────────────────
 # 메인 파이프라인
 # ─────────────────────────────────────────────
 def run_scraping_pipeline(request=None):
@@ -963,9 +950,7 @@ def _run_pipeline(stats: dict) -> str:
         scrape_junggu,           # 중구 ✅ (2026-04-09 추가)
         scrape_yongsan,          # 용산 ✅ (2026-04-09 추가)
         scrape_seodaemun,        # 서대문 ✅ (2026-04-09 추가)
-        scrape_gangseo,          # 강서 ✅ (2026-05-06 추가)
-        scrape_dongjak,          # 동작 ✅ (2026-05-06 추가)
-        scrape_gwanak,           # 관악 ✅ (2026-05-06 추가, doBbsFView)
+        # 강서·동작·관악구청은 6개월 저장 0건 → 2026-11-18 그 구의 복지관으로 교체 (아래 게시판 출처)
         scrape_yangcheon,        # 양천 ✅ (2026-05-06 추가, doBbsFView + wdigm_title)
         # 노인복지관 (7곳)
         scrape_surak_welfare,    # 노원 수락 ✅
@@ -976,9 +961,14 @@ def _run_pipeline(stats: dict) -> str:
         scrape_yongsan_welfare,  # 용산 ✅ (2026-04-09 추가)
         scrape_seodaemun_welfare, # 서대문 ✅ (2026-04-09 추가)
     ]
+    # 범용 목록 파서로 읽는 게시판 (board_sources.py): 서울 교체분은 항상, 경기는 GYEONGGI=1일 때만
+    boards = board_sources.SEOUL_BOARDS + (board_sources.GYEONGGI_BOARDS if GYEONGGI else [])
+    scrapers += [_board_scraper(name, urls) for name, _region, urls in boards]
+    if GYEONGGI:
+        scrapers += [_json_scraper(name, cfg) for name, _region, cfg in board_sources.JSON_BOARDS]
 
     all_articles: list[dict] = []
-    with concurrent.futures.ThreadPoolExecutor(max_workers=23) as executor:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=min(len(scrapers), 32)) as executor:
         futures = {executor.submit(fn): fn.__name__ for fn in scrapers}
         for future in concurrent.futures.as_completed(futures):
             fn_name = futures[future]
@@ -997,6 +987,10 @@ def _run_pipeline(stats: dict) -> str:
     saved_count   = 0
     skipped_count = 0
     bokjiro_saved = 0   # 이번 실행에서 저장한 복지로 건수
+    warm = _load_warm_sources()
+    new_sources = {a.get("source", "") for a in all_articles} - warm
+    if new_sources:
+        logger.info(f"🆕 첫 수집 출처(이번엔 알림 없이 저장): {', '.join(sorted(new_sources))}")
 
     for article in all_articles:
         title   = article.get("title",   "").strip()
@@ -1031,7 +1025,7 @@ def _run_pipeline(stats: dict) -> str:
 
             # 키워드 프리필터: 복지관 출처는 이미 어르신 대상 기관이라 통과.
             # 구청 등 일반 출처는 제목에 노인 관련 키워드가 없으면 AI 호출 생략 (llm_judge.SENIOR_KEYWORDS)
-            if source not in WELFARE_CENTER_SOURCES and not llm_judge.has_senior_keyword(title):
+            if not sources.is_center(source) and not llm_judge.has_senior_keyword(title):
                 logger.info(f"⏭️  키워드 필터: {title[:30]}")
                 skipped_count += 1
                 continue
@@ -1044,7 +1038,7 @@ def _run_pipeline(stats: dict) -> str:
             # 본문이 없으면 상세 페이지에서 가져옴
             if not content:
                 content = fetch_detail_content(url, source, title)
-            ai_summary = llm_judge.judge_notice(title, content, source, source in WELFARE_CENTER_SOURCES)
+            ai_summary = llm_judge.judge_notice(title, content, source, sources.is_center(source))
             stats["llm_calls"] += 1
             if ai_summary.strip().upper() == "ERROR":
                 stats["llm_errors"] += 1
@@ -1055,8 +1049,11 @@ def _run_pipeline(stats: dict) -> str:
                 mark_skipped(title, source, url)
                 continue
 
-        save_to_firestore(title, ai_summary, source, url)
+        save_to_firestore(title, ai_summary, source, url, silent=source in new_sources)
         saved_count += 1
+
+    if new_sources:
+        _save_warm_sources(warm | new_sources)
 
     stats["saved"], stats["skipped"] = saved_count, skipped_count
     result_msg = (
