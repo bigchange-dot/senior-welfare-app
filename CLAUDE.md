@@ -108,8 +108,11 @@ Claude Code가 이 프로젝트에서 작업할 때 반드시 따르는 규칙�
 all, bokjiro, nowon, dobong, jungnang, mapo, eunpyeong, seongdong, gangbuk
 ```
 
-새 구청 추가 시 `notification_function.py`의 `SOURCE_TOPIC_MAP`과
-`settings_screen.dart`의 `_regions`, `home_screen.dart`의 `_filters` 세 곳 모두 업데이트.
+실제 사용 토픽은 위 목록보다 많음 — `fcm_service.dart`의 `FcmService.allTopics`(17개)가 기준.
+새 구청 추가 시 `notification_function.py`의 `SOURCE_TOPIC_MAP`, `settings_screen.dart`의 `_regions`,
+`home_screen.dart`의 `_filters`, `fcm_service.dart`의 `allTopics` 네 곳 모두 업데이트.
+2026-11-17: 강북·강서·동작·관악은 `_filters`·`_regions`에서 뺐음(수집 제외·공고 0건). `allTopics`·`SOURCE_TOPIC_MAP`에는 남김.
+되살릴 때는 `_filters`와 `_regions`에 다시 추가.
 
 ---
 

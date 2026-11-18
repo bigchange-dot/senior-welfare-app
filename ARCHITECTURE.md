@@ -237,6 +237,11 @@ def _get_db():
 
 ## 4. Frontend 설계
 
+**FCM 토픽 구독 규칙 (`FcmService.syncSubscriptions`, 2026-09-03):**
+서버는 모든 공고를 `all` + 지역 토픽에 동시 발송한다. 중복 수신을 막기 위해 앱은
+지역을 1개 이상 고른 사용자는 지역 토픽만, 고르지 않은 사용자는 `all`만 구독한다.
+알림 OFF는 `FcmService.allTopics` 17개 전부 해지. 앱 시작 시에도 저장된 설정으로 동기화.
+
 ### 4.1 화면 구성 (3탭)
 
 ```
@@ -278,15 +283,37 @@ def _get_db():
 - FCM 딥링크로 직접 진입 가능 (`/webview` 라우트)
 - 광고 단위 ID: 환경변수 `ADMOB_INTERSTITIAL_ID` (기본값: 구글 테스트 ID)
 
+### 4.3a 광고 (`services/ad_service.dart`, 2026-09-03)
+
+| 포맷 | 위치 | 비고 |
+|------|------|------|
+| 배너 (320×100) | 홈 목록 6번째 항목마다 `BannerAdCard` | `AutomaticKeepAliveClientMixin`으로 스크롤 시 재요청 방지, 로드 실패 시 숨김 |
+| 전면광고 | WebView 뒤로가기 | 세션당 3회, 3분 간격 상한 (`AdService.canShowInterstitial`) |
+
+- 디버그 빌드는 구글 테스트 광고 ID, 릴리스만 실제 ID 사용
+- 배너 광고 단위 ID는 AdMob 콘솔에서 생성 후 `_bannerProd`에 입력 필요
+
+### 4.3b 홈 화면 상태 처리 (2026-11-17)
+
+- 캐시의 빈 결과(`metadata.isFromCache` + 0건) → "인터넷에 연결되어 있지 않아요" + 다시 시도. 오류 화면도 다시 시도 버튼·당겨서 새로고침
+- 저장된 공고(캐시)를 보여 줄 때 목록 맨 위에 오프라인 안내
+- 새로고침(앱바 버튼·당겨서·다시 시도)은 `GetOptions(source: Source.server)`로 서버에서 다시 받음 (`HomeScreenState.refresh`)
+- 목록 배너 광고 위에 '광고' 표시. 카드의 시간·출처 배지 16px, 찜 버튼 52×52
+
 ### 4.4 FCM Deep Linking 흐름
 
 ```
 FCM 알림 수신
     │
-    ├─ 앱 실행 중: onMessage → SnackBar 표시
+    ├─ 앱 실행 중: onMessage → 로그만 (화면 표시 없음 — 미구현)
     ├─ 백그라운드: onMessageOpenedApp → WebViewScreen 이동
-    └─ 앱 종료 상태: getInitialMessage → 시작 시 WebViewScreen 이동
+    └─ 앱 종료 상태: getInitialMessage → 첫 화면이 그려진 뒤 WebViewScreen 이동
 ```
+
+- 2026-11-17 수정: 예전엔 `main()`이 `runApp()` 전에 초기화를 기다리며 시작 메시지를 처리해 네비게이터가 없어 무시됐음(홈이 열림).
+  지금은 `_handleMessage`가 네비게이터가 없으면 `addPostFrameCallback`으로 미루고, `main()`은 FCM 초기화를 기다리지 않음
+- `initialize()`는 권한·토큰(디버그만)·처리기 등록·시작 메시지·토픽 구독을 단계별로 예외 처리 (토큰 실패가 나머지를 막지 않게)
+- 로컬 빌드는 FCM 토큰을 못 받으므로 이 흐름은 Play 내부 테스트 트랙에서 확인한다 (CLAUDE.md)
 
 ### 4.5 주요 패키지
 

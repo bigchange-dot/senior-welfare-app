@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:webview_flutter/webview_flutter.dart';
+import '../services/ad_service.dart';
 import '../theme.dart';
 
 /// 공고 상세 WebView 화면
@@ -29,8 +30,6 @@ class _WebViewScreenState extends State<WebViewScreen> {
   late final WebViewController _controller;
   bool _isLoading = true;
   InterstitialAd? _interstitialAd;
-
-  static const String _adUnitId = 'ca-app-pub-5634467403173492/3253182704';
 
   @override
   void initState() {
@@ -60,9 +59,11 @@ class _WebViewScreenState extends State<WebViewScreen> {
   }
 
   /// Interstitial 광고 미리 로드
+  /// 빈도 제한(세션당 3회, 3분 간격)에 걸리면 요청 자체를 하지 않음
   void _loadInterstitialAd() {
+    if (!AdService.canShowInterstitial()) return;
     InterstitialAd.load(
-      adUnitId: _adUnitId,
+      adUnitId: AdService.interstitialAdUnitId,
       request: const AdRequest(),
       adLoadCallback: InterstitialAdLoadCallback(
         onAdLoaded: (ad) {
@@ -99,8 +100,9 @@ class _WebViewScreenState extends State<WebViewScreen> {
   }
 
   void _showInterstitialAndPop() {
-    if (_interstitialAd != null) {
+    if (_interstitialAd != null && AdService.canShowInterstitial()) {
       // 광고 표시 — 광고 닫힌 후 Navigator.pop은 FullScreenContentCallback에서 처리
+      AdService.recordInterstitialShown();
       _interstitialAd!.show();
     } else {
       // 광고 미로드 시 즉시 pop

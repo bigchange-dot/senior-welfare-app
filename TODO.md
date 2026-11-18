@@ -1,12 +1,18 @@
 # Senior Welfare App — 작업 현황
 
 > 마지막 업데이트: 2026-11-18 (전체 검토 1~7단계 완료 — 아래 '진행 중인 작업')
-> 앱 버전: 1.4.0+7 (Play Console 검토 중)
+> 앱 버전: 1.4.1+8 (빌드 준비, 배너 광고 단위 ID 교체 후 출시)
 
 ---
 
 ## 📝 다음 빌드(v1.4.1+8) 포함 예정 — 코드는 반영, 미배포
 
+- [x] **배너 광고 실구현** (2026-09-03): 홈 목록 6번째마다 있던 회색 플레이스홀더를 실제 `BannerAd`(320×100)로 교체 → `widgets/notice_card.dart` `BannerAdCard`
+  - ⚠️ **AdMob 콘솔에서 배너 광고 단위를 새로 만들어 `services/ad_service.dart`의 `_bannerProd` 교체 필요.** 교체 전에는 로드 실패로 배너 자리가 비어 보임
+  - 디버그 빌드는 구글 테스트 ID 자동 사용 (개발 중 실광고 클릭 방지)
+- [x] **전면광고 빈도 제한** (2026-09-03): 세션당 최대 3회, 최소 3분 간격 → `AdService.canShowInterstitial()`. 노인 사용자 오클릭·과다 노출로 인한 무효 트래픽 판정 방지
+- [x] **알림 끄기 버그 수정** (2026-09-03): `unsubscribeAll`이 4개 토픽만 해지하던 것을 전체 17개로 → `FcmService.allTopics`
+- [x] **중복 알림 수정** (2026-09-03): 지역을 고른 사용자는 `all` 해지 + 지역 토픽만 구독, 미선택 시 `all`만 구독 → `FcmService.syncSubscriptions()` (앱 시작·지역 변경·알림 ON 시 호출)
 - [x] **`bookmarks_screen.dart`**: 찜 화면 "내 지역 공고"에 복지관 누락 버그 수정
   - 원인: `selected_sources`(예: `['도봉구청']`)를 그대로 `whereIn`에 전달 → `'도봉노인복지관'` source 매치 안 됨
   - 수정: `_regionToSources` 매핑 dict 추가 → `expand()`로 `['도봉구청', '도봉노인복지관']`으로 확장

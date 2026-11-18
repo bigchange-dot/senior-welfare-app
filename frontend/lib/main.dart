@@ -1,3 +1,4 @@
+import 'dart:async';
 
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
@@ -32,8 +33,10 @@ void main() async {
       // FCM 백그라운드 핸들러 (반드시 runApp 전에 등록)
       FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
 
-      // FCM 서비스 초기화
-      await FcmService.instance.initialize();
+      // FCM 서비스 초기화 — 기다리지 않는다 (2026-11-17).
+      // 토픽 17개 구독을 기다리면 첫 화면이 늦게 뜨고, 오프라인이면 더 늦어진다.
+      // 꺼진 상태 알림 탭 처리는 FcmService가 첫 화면 뒤로 미뤄 처리한다.
+      unawaited(FcmService.instance.initialize());
 
       // AdMob 초기화
       await MobileAds.instance.initialize();
@@ -92,6 +95,7 @@ class MainScaffold extends StatefulWidget {
 class _MainScaffoldState extends State<MainScaffold> {
   int _currentIndex = 0;
 
+  final _homeKey      = GlobalKey<HomeScreenState>();
   final _bookmarksKey = GlobalKey<BookmarksScreenState>();
 
   static const List<String> _titles = ['어르신 알리미', '찜한 공고', '설정'];
@@ -102,21 +106,19 @@ class _MainScaffoldState extends State<MainScaffold> {
       appBar: AppBar(
         title: Text(_titles[_currentIndex]),
         actions: [
+          // 예전엔 그림(Icon)만 있어 눌러도 아무 일이 없었음 (2026-11-17 앱 점검)
           if (_currentIndex == 0)
-            Padding(
-              padding: const EdgeInsets.only(right: 12),
-              child: Icon(
-                Icons.autorenew,
-                color: Colors.white.withValues(alpha: 0.8),
-                size: 24,
-              ),
+            IconButton(
+              icon:      const Icon(Icons.refresh, size: 30),
+              tooltip:   '새로고침',
+              onPressed: () => _homeKey.currentState?.refresh(),
             ),
         ],
       ),
       body: IndexedStack(
         index: _currentIndex,
         children: [
-          const HomeScreen(),
+          HomeScreen(key: _homeKey),
           BookmarksScreen(key: _bookmarksKey),
           const SettingsScreen(),
         ],

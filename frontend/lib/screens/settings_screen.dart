@@ -14,6 +14,8 @@ class SettingsScreen extends StatefulWidget {
 
 class _SettingsScreenState extends State<SettingsScreen> {
   // 선택 가능한 지역 목록 (source 값 + 표시명 + FCM 토픽)
+  // 강북(수집 제외)·강서·동작·관악(공고 0건)은 뺌 (2026-11-17). 되살릴 때 home_screen.dart _filters도 함께.
+  // FcmService.allTopics에는 남겨 둔다 (예전에 구독한 토픽을 해지할 수 있게)
   static const List<Map<String, String>> _regions = [
     {'label': '전체',               'source': '',         'topic': ''},
     {'label': '복지로 (중앙정부)',   'source': '복지로',   'topic': 'bokjiro'},
@@ -23,14 +25,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
     {'label': '마포구청',           'source': '마포구청', 'topic': 'mapo'},
     {'label': '은평구청',           'source': '은평구청', 'topic': 'eunpyeong'},
     {'label': '성동구청',           'source': '성동구청', 'topic': 'seongdong'},
-    {'label': '강북구청',           'source': '강북구청', 'topic': 'gangbuk'},
     {'label': '종로구청',           'source': '종로구청', 'topic': 'jongno'},
     {'label': '중구청',             'source': '중구청',   'topic': 'junggu'},
     {'label': '용산구청',           'source': '용산구청', 'topic': 'yongsan'},
     {'label': '서대문구청',         'source': '서대문구청','topic': 'seodaemun'},
-    {'label': '강서구청',           'source': '강서구청', 'topic': 'gangseo'},
-    {'label': '동작구청',           'source': '동작구청', 'topic': 'dongjak'},
-    {'label': '관악구청',           'source': '관악구청', 'topic': 'gwanak'},
     {'label': '양천구청',           'source': '양천구청', 'topic': 'yangcheon'},
   ];
 
@@ -47,11 +45,26 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Future<void> _loadPrefs() async {
-    final prefs = await SharedPreferences.getInstance();
+    final prefs   = await SharedPreferences.getInstance();
+    final sources = prefs.getStringList('selected_sources') ?? [];
+    final topics  = prefs.getStringList('selected_topics')  ?? [];
+
+    // 목록에서 뺀 지역을 예전에 골라 둔 경우 정리 (화면에 없어 해제할 수 없고 3개 상한만 차지함)
+    final validSources = _regions.map((r) => r['source']!).toSet();
+    final validTopics  = _regions.map((r) => r['topic']!).toSet();
+    final keptSources  = sources.where(validSources.contains).toList();
+    final keptTopics   = topics.where(validTopics.contains).toList();
+    if (keptSources.length != sources.length || keptTopics.length != topics.length) {
+      await prefs.setStringList('selected_sources', keptSources);
+      await prefs.setStringList('selected_topics',  keptTopics);
+      await FcmService.instance.syncSubscriptions();
+    }
+
+    if (!mounted) return;
     setState(() {
-      _selectedSources = prefs.getStringList('selected_sources') ?? [];
-      _selectedTopics  = prefs.getStringList('selected_topics')  ?? [];
-      _notifEnabled    = prefs.getBool('notif_enabled')          ?? true;
+      _selectedSources = keptSources;
+      _selectedTopics  = keptTopics;
+      _notifEnabled    = prefs.getBool('notif_enabled') ?? true;
     });
   }
 
@@ -99,18 +112,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
     await prefs.setStringList('selected_sources', newSources);
     await prefs.setStringList('selected_topics',  newTopics);
 
-    // FCM 토픽 변경
-    if (isSelected) {
-      await FcmService.instance.updateRegionTopic(
-        oldTopic: topic.isNotEmpty ? topic : null,
-        newTopic: null,
-      );
-    } else {
-      await FcmService.instance.updateRegionTopic(
-        oldTopic: null,
-        newTopic: topic.isNotEmpty ? topic : null,
-      );
-    }
+    // FCM 토픽 동기화 (지역 선택 여부에 따라 all ↔ 지역 토픽 전환, 중복 알림 방지)
+    await FcmService.instance.syncSubscriptions();
 
     if (mounted) {
       final msg = isSelected
@@ -133,16 +136,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool('notif_enabled', value);
 
-    if (value) {
-      await FcmService.instance.updateRegionTopic(newTopic: 'all');
-      for (final topic in _selectedTopics) {
-        if (topic.isNotEmpty) {
-          await FcmService.instance.updateRegionTopic(newTopic: topic);
-        }
-      }
-    } else {
-      await FcmService.instance.unsubscribeAll();
-    }
+    // ON → 저장된 지역 설정대로 구독, OFF → 전체 토픽 해지
+    await FcmService.instance.syncSubscriptions();
   }
 
   @override
@@ -166,7 +161,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             children: [
               const Expanded(
                 child: Text(
-                  '선택한 지역의 복지 공고를 찜 탭에서 모아볼 수 있어요.',
+                  '고른 지역의 새 공고를 알림으로 받고, 찜 탭에서 모아볼 수 있어요. 고르지 않으면 모든 지역 알림을 받아요.',
                   style: TextStyle(
                     fontSize: SeniorTheme.fontMD,
                     color:    SeniorTheme.textSecond,

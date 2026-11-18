@@ -24,7 +24,8 @@ class SeniorTheme {
 
   // ── 폰트 크기 (figma.md 접근성 기준) ──
   // 본문 18px 이상, 제목 24px 이상 (WCAG AA)
-  static const double fontXS  = 14.0;  // 캡션·배지 (비본문)
+  static const double fontXS  = 14.0;  // 캡션 (비본문)
+  static const double fontCaption = 16.0;  // 카드의 시간·출처 배지 (14px는 어르신에게 작음, 2026-11-17 앱 점검)
   static const double fontSM  = 18.0;  // 보조 본문 (figma: 18px 최소)
   static const double fontMD  = 20.0;  // 메인 본문
   static const double fontLG  = 24.0;  // 카드 제목 (figma: 24px 최소)

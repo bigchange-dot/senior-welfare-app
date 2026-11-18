@@ -15,11 +15,13 @@ class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
 
   @override
-  State<HomeScreen> createState() => _HomeScreenState();
+  State<HomeScreen> createState() => HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> {
+class HomeScreenState extends State<HomeScreen> {
   // 필터 칩 목록 — sources 복수 지정 시 whereIn 쿼리로 구청+복지관 통합 표시
+  // 강북(수집 제외)·강서·동작·관악(6개월 공고 0건)은 눌러도 빈 화면이라 뺌 (2026-11-17).
+  // 복지관 등으로 출처를 다시 찾으면 settings_screen.dart의 _regions와 함께 되살릴 것
   static const List<_FilterChipData> _filters = [
     _FilterChipData(label: '전체',    sources: []),
     _FilterChipData(label: '복지로',  sources: ['복지로']),
@@ -29,14 +31,10 @@ class _HomeScreenState extends State<HomeScreen> {
     _FilterChipData(label: '마포구청', sources: ['마포구청', '마포노인복지관']),
     _FilterChipData(label: '은평구청', sources: ['은평구청', '은평노인복지관']),
     _FilterChipData(label: '성동구청', sources: ['성동구청', '성동구 어르신일자리']),
-    _FilterChipData(label: '강북구청', sources: ['강북구청']),
     _FilterChipData(label: '종로구청', sources: ['종로구청', '종로노인복지관']),
     _FilterChipData(label: '중구청',   sources: ['중구청', '약수노인복지관']),
     _FilterChipData(label: '용산구청', sources: ['용산구청', '용산노인복지관']),
     _FilterChipData(label: '서대문구청', sources: ['서대문구청', '서대문노인복지관']),
-    _FilterChipData(label: '강서구청', sources: ['강서구청']),
-    _FilterChipData(label: '동작구청', sources: ['동작구청']),
-    _FilterChipData(label: '관악구청', sources: ['관악구청']),
     _FilterChipData(label: '양천구청', sources: ['양천구청']),
   ];
 
@@ -51,6 +49,22 @@ class _HomeScreenState extends State<HomeScreen> {
     super.initState();
     _loadBookmarks();
     _noticeFuture = _query.get();
+  }
+
+  /// 앱바 새로고침 버튼·당겨서 새로고침·다시 시도 버튼에서 호출. 서버에서 다시 받는다
+  /// (기본 get()은 연결이 막 돌아온 직후 캐시를 돌려줄 수 있어 화면이 회복되지 않았음)
+  Future<void> refresh() async {
+    final future = _query.get(const GetOptions(source: Source.server));
+    // 화살표 함수로 쓰면 대입값(Future)을 돌려줘 setState가 예외를 던진다.
+    // 출시본(v1.4.0)의 당겨서 새로고침이 이 때문에 동작하지 않았음 (2026-11-17 앱 점검)
+    setState(() {
+      _noticeFuture = future;
+    });
+    try {
+      await future;
+    } catch (_) {
+      // 오류는 FutureBuilder가 화면에 표시
+    }
   }
 
   Future<void> _loadBookmarks() async {
@@ -163,11 +177,7 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget _buildFirestoreList() {
     return RefreshIndicator(
       color: SeniorTheme.primary,
-      onRefresh: () async {
-        final newFuture = _query.get();
-        setState(() => _noticeFuture = newFuture);
-        await newFuture;
-      },
+      onRefresh: refresh,
       child: FutureBuilder<QuerySnapshot>(
         future: _noticeFuture,
         builder: (context, snapshot) {
@@ -188,56 +198,49 @@ class _HomeScreenState extends State<HomeScreen> {
           }
 
           if (snapshot.hasError) {
-            return const Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(Icons.error_outline, size: 64, color: Colors.red),
-                  SizedBox(height: 16),
-                  Text(
-                    '잠시 후 다시 시도해 주세요.',
-                    style: TextStyle(fontSize: SeniorTheme.fontMD, color: SeniorTheme.textSecond),
-                  ),
-                ],
-              ),
+            return _MessageView(
+              icon:    Icons.wifi_off,
+              message: '공고를 불러오지 못했어요.\n인터넷 연결을 확인해 주세요.',
+              onRetry: refresh,
             );
           }
 
-          if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-            return LayoutBuilder(
-              builder: (context, constraints) => SingleChildScrollView(
-                physics: const AlwaysScrollableScrollPhysics(),
-                child: SizedBox(
-                  height: constraints.maxHeight,
-                  child: Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        const Icon(Icons.inbox_outlined, size: 80, color: SeniorTheme.textSecond),
-                        const SizedBox(height: 20),
-                        Text(
-                          _selectedSources.isEmpty ? '아직 등록된 공고가 없습니다.' : '${_filters[_selectedFilterIdx].label} 공고가 없습니다.',
-                          style: const TextStyle(fontSize: SeniorTheme.fontMD, color: SeniorTheme.textSecond),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
+          final data = snapshot.data;
+          // 인터넷 없이 처음 열면 Firestore가 오류 대신 '캐시의 빈 결과'를 준다 →
+          // "공고가 없습니다"로 보이면 어르신은 정말 공고가 없다고 여김 (2026-11-17 앱 점검)
+          if (data != null && data.docs.isEmpty && data.metadata.isFromCache) {
+            return _MessageView(
+              icon:    Icons.wifi_off,
+              message: '인터넷에 연결되어 있지 않아요.\n연결한 뒤 다시 시도해 주세요.',
+              onRetry: refresh,
             );
           }
 
-          final notices = snapshot.data!.docs
+          if (data == null || data.docs.isEmpty) {
+            return _MessageView(
+              icon:    Icons.inbox_outlined,
+              message: _selectedSources.isEmpty
+                  ? '아직 등록된 공고가 없습니다.'
+                  : '${_filters[_selectedFilterIdx].label} 공고가 없습니다.',
+            );
+          }
+
+          final notices = data.docs
               .map((doc) => WelfareNotice.fromFirestore(doc))
               .toList();
-          final itemCount = notices.length + (notices.length ~/ 5);
+          // 인터넷이 끊겨 저장된 공고를 보여 줄 때는 맨 위에 안내 한 줄
+          final offline   = data.metadata.isFromCache;
+          final head      = offline ? 1 : 0;
+          final itemCount = head + notices.length + (notices.length ~/ 5);
 
           return ListView.builder(
             physics: const AlwaysScrollableScrollPhysics(),
             padding: const EdgeInsets.only(top: 8, bottom: 80),
             itemCount: itemCount,
-            itemBuilder: (context, idx) {
-              if ((idx + 1) % 6 == 0) return const AdPlaceholderCard();
+            itemBuilder: (context, i) {
+              if (offline && i == 0) return const _OfflineNotice();
+              final idx = i - head;
+              if ((idx + 1) % 6 == 0) return const BannerAdCard();
               final noticeIdx = idx - (idx ~/ 6);
               if (noticeIdx >= notices.length) return const SizedBox.shrink();
               final notice = notices[noticeIdx];
@@ -259,6 +262,84 @@ class _HomeScreenState extends State<HomeScreen> {
             },
           );
         },
+      ),
+    );
+  }
+}
+
+// ── 안내 화면 (빈 목록·오류·오프라인) ──────────────
+/// 당겨서 새로고침이 되도록 스크롤 가능하게 만들고, onRetry가 있으면 '다시 시도' 버튼을 보인다.
+/// 예전 오류 화면은 스크롤이 안 돼 당겨서 새로고침도, 버튼도 없어 빠져나갈 수 없었음.
+class _MessageView extends StatelessWidget {
+  final IconData icon;
+  final String   message;
+  final Future<void> Function()? onRetry;
+
+  const _MessageView({required this.icon, required this.message, this.onRetry});
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) => SingleChildScrollView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        child: ConstrainedBox(
+          constraints: BoxConstraints(minHeight: constraints.maxHeight),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 24),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(icon, size: 80, color: SeniorTheme.textSecond),
+                const SizedBox(height: 20),
+                Text(
+                  message,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(fontSize: SeniorTheme.fontMD, color: SeniorTheme.textSecond, height: 1.5),
+                ),
+                if (onRetry != null) ...[
+                  const SizedBox(height: 28),
+                  SizedBox(
+                    width: 220,
+                    child: ElevatedButton.icon(
+                      onPressed: onRetry,
+                      icon:  const Icon(Icons.refresh, size: 26),
+                      label: const Text('다시 시도'),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// 인터넷이 끊겨 저장된 공고를 보여 줄 때 목록 맨 위 안내
+class _OfflineNotice extends StatelessWidget {
+  const _OfflineNotice();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin:  const EdgeInsets.fromLTRB(16, 4, 16, 8),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      decoration: BoxDecoration(
+        color:        const Color(0xFFFFF3E0),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: const Row(
+        children: [
+          Icon(Icons.wifi_off, color: SeniorTheme.orangeAccent, size: 26),
+          SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              '인터넷에 연결되어 있지 않아 저장된 공고를 보여 드려요. 아래로 당기면 새로고침돼요.',
+              style: TextStyle(fontSize: SeniorTheme.fontSM, color: SeniorTheme.textPrimary, height: 1.4),
+            ),
+          ),
+        ],
       ),
     );
   }
