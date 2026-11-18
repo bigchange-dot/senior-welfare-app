@@ -146,23 +146,26 @@ class FcmService {
       );
       final previous = (prefs.getStringList(_subscribedKey) ?? _legacyTopics).toSet();
 
-      // 토픽별로 개별 예외 처리: 하나가 실패해도 나머지는 계속. 해지에 실패한 토픽은 다음에 다시 시도
+      // 받을 토픽을 먼저, 한꺼번에 구독한 뒤 안 쓰는 토픽을 한꺼번에 해지한다 (2026-11-19).
+      // 예전엔 하나씩 차례로(해지 16개 → 구독) 해서 업데이트 직후 첫 실행에 17초 걸렸고,
+      // 그 사이 앱을 닫으면 새 지역 구독이 안 됐다 (태블릿 Play 내부 테스트에서 확인).
+      // 토픽별로 예외를 따로 잡는다: 하나가 실패해도 나머지는 계속. 해지에 실패한 토픽은 다음에 다시 시도
+      await Future.wait(wanted.map((topic) async {
+        try {
+          await fcm.subscribeToTopic(topic);
+        } catch (e) {
+          debugPrint('FCM 토픽 구독 실패 [$topic]: $e');
+        }
+      }));
       final failedUnsub = <String>{};
-      for (final topic in previous.difference(wanted)) {
+      await Future.wait(previous.difference(wanted).map((topic) async {
         try {
           await fcm.unsubscribeFromTopic(topic);
         } catch (e) {
           failedUnsub.add(topic);
           debugPrint('FCM 토픽 해지 실패 [$topic]: $e');
         }
-      }
-      for (final topic in wanted) {
-        try {
-          await fcm.subscribeToTopic(topic);
-        } catch (e) {
-          debugPrint('FCM 토픽 구독 실패 [$topic]: $e');
-        }
-      }
+      }));
       await prefs.setStringList(_subscribedKey, {...wanted, ...failedUnsub}.toList());
       debugPrint('✅ FCM 토픽 동기화: ${wanted.join(', ')}');
     } catch (e) {

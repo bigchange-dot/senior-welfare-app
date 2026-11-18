@@ -31,6 +31,10 @@
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />
+        <!-- 알림 기본 채널: 채널을 지정하지 않은 알림도 '기타' 대신 복지 공고 채널로 (MainActivity가 만듦, 2026-11-19) -->
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_channel_id"
+            android:value="welfare_alerts" />
         <!-- AdMob App ID -->
         <meta-data
             android:name="com.google.android.gms.ads.APPLICATION_ID"
