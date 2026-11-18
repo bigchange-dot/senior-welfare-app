@@ -1,4 +1,6 @@
-# 경기 노인복지관 출처 설정 초안 (2026-11-18 표본 12곳 1·2차 점검, docs/경기-복지관-조사-2026-11-18.md)
+# 경기 노인복지관·시니어클럽 출처 설정 초안 (2026-11-18, docs/경기-복지관-조사-2026-11-18.md)
+# 목록: 경기도노인종합복지관협회 회원기관 69곳 + 한국시니어클럽협회 경기도 30곳 (사용자가 브라우저로 저장한 페이지에서 추출)
+# 부천 원미·소사·오정 복지관과 부천시니어클럽은 시 공동 포털 게시판 하나라 한 항목으로 묶음
 #
 # 수집 방식(parser):
 #   dated_list = 범용 목록 파서 — 목록 페이지에서 '날짜가 가까이 붙은 링크'를 글로 읽음 (서버가 HTML로 그려 주는 게시판)
@@ -6,49 +8,139 @@
 #   anyboard   = 은평노인복지관과 같은 플랫폼 (/main/sub.html?boardID=wwwN, 글 링크에 Mode=view)
 #   json_api   = 목록을 JSON으로 받는 사이트 (전용 파서)
 #   js_link    = 글 링크가 자바스크립트(onclick)인 게시판 (전용 파서)
-# status: ok(목록 확인) / todo(추가 확인 필요) / blocked(403 등 차단 — 우회하지 않음)
+#   bid        = /bbs/?bid=이름 형식 게시판 (중원·동작노인종합복지관과 같은 플랫폼)
+# status: ok(목록 확인) / todo(추가 확인 필요) / stale(찾은 게시판에 최근 글 없음) / blocked(403 등 차단 — 우회하지 않음) / none(홈페이지 없음·블로그)
+# stats: 점검 시점(2026-11-18)의 최근 30일 글 수, 규칙 필터 제외 수/목록 글 수, 최신 글 날짜
 # tls: chain = 중간 인증서 누락 → backend/certs/intermediates.pem에 추가 필요 (ca_issuer = 받을 주소)
 #
 # 아직 파이프라인에 연결하지 않음: 앱에 경기 지역(시·도 → 시·군 2단계)과 'all' 토픽 정책을 먼저 정해야 함
 
+
 centers:
-  # ── 수원 ──
-  - {city: 수원시, name: SK청솔노인복지관, status: ok, parser: dated_list,
-     list_url: "http://scsnoin.or.kr/?state=notice"}
-  - {city: 수원시, name: 팔달노인복지관, status: ok, parser: dated_list,
-     list_url: "http://www.pdsenior.or.kr/paldalintro/paldal_notice.jsp"}
-  - {city: 수원시, name: 서호노인복지관, status: ok, parser: dated_list, tls: chain,
-     list_url: "https://www.seoho.or.kr/well/board/notice_list.jsp",
-     ca_issuer: "http://cacerts.digicert.com/RapidSSLG5TLSRSA4096SHA3842022CA1.crt"}
-  - {city: 수원시, name: 버드내노인복지관, status: todo, parser: anyboard,
-     home: "http://www.budnae.or.kr/main/main.html", note: "메뉴가 스크립트로만 그려짐. boardID www1~40에 게시판 없음 — 브라우저로 확인"}
-  - {city: 수원시, name: 밤밭노인복지관, status: blocked, home: "http://www.bambat.org/", note: "403 (맥에서도)"}
-  - {city: 수원시, name: 광교노인복지관, status: blocked, home: "http://www.ggsenior.or.kr/", note: "403"}
-
-  # ── 성남 ──
-  - {city: 성남시, name: 중원노인종합복지관, status: ok, parser: dated_list,
-     list_url: "https://jwnoin.org/bbs/?bid=notice", extra_urls: ["https://jwnoin.org/bbs/?bid=participant"],
-     note: "bid=sns는 사진 게시판이라 제외"}
-
-  # ── 화성 ──
-  - {city: 화성시, name: 동탄노인복지관, status: ok, parser: json_api,
-     list_url: "https://www.dtsenior.or.kr/api/bbs/1.0/base?BBS_CD=001&PAGE_NO=1&PAGE_SIZE=20",
-     note: "Accept: application/json + X-Requested-With: XMLHttpRequest 헤더 필요. 필드 SJ(제목)·REG_DT(등록일)·CNTN(본문)·SNTNC_NO(글번호), FIXING_YN=고정글"}
-
-  # ── 고양 ──
-  - {city: 고양시, name: 대화노인종합복지관, status: ok, parser: dated_list,
-     list_url: "https://senior-edu.net/guide/notice.php",
-     note: "본 사이트 community/notice.php는 2026-09 이후 글 없음. 활동은 선배시민 사이트(senior-edu.net)에 올라옴 — 어느 쪽을 볼지 결정"}
-
-  # ── 용인 ──
-  - {city: 용인시, name: 기흥노인복지관, status: ok, parser: anyboard,
-     list_url: "https://www.ygsenior.or.kr/main/sub.html?boardID=www14", note: "날짜 표기 형식이 은평과 다름 — 파서에서 처리"}
-
-  # ── 부천 ──
-  - {city: 부천시, name: 원미·소사·오정노인복지관 + 부천시니어클럽, status: ok, parser: js_link,
-     list_url: "https://senior.bucheon4u.kr/senior/user/bbs/BD_selectBbsList.do?q_domnCode=2&q_bbsCode=1005",
-     note: "시 운영 공동 포털 게시판 하나에 4기관 글이 모임. 제목 앞 기관 이름(원미·소사·오정·시니어클럽)으로 출처 구분"}
-
-  # ── 파주 ──
-  - {city: 파주시, name: 파주시노인복지관, status: ok, parser: g5,
-     list_url: "http://www.pajusenior.or.kr/notice"}
+  # ── 성남시 (8) ──
+  - {kind: 복지관, name: 분당노인종합복지관, status: ok, parser: dated_list, list_url: "https://www.bdsenior.or.kr/73", stats: "30일 11, 규칙제외 0/15, 최신 2026-11-12"}
+  - {kind: 복지관, name: 수정노인종합복지관, status: ok, parser: dated_list, list_url: "https://www.sunobok.or.kr/content/05notice/01_01.php", stats: "30일 11, 규칙제외 1/14, 최신 2026-11-16"}
+  - {kind: 복지관, name: 수정중앙노인종합복지관, status: ok, parser: bid, list_url: "https://www.sswc.kr/bbs/?bid=notice", stats: "30일 5, 규칙제외 13/21, 최신 2026-11-16"}
+  - {kind: 복지관, name: 판교노인종합복지관, status: ok, parser: dated_list, list_url: "https://www.pangyonoin.or.kr/board_notice01/list.php?tn=board_notice01&G_state=Y", stats: "30일 13, 규칙제외 1/17, 최신 2026-11-16"}
+  - {kind: 복지관, name: 중원노인종합복지관, status: ok, parser: dated_list, list_url: "https://jwnoin.org/bbs/?bid=notice", extra_urls: ["https://jwnoin.org/bbs/?bid=participant"], note: bid=sns는 사진 게시판이라 제외}
+  - {kind: 복지관, name: 황송노인종합복지관, status: todo, parser: dated_list, list_url: "https://www.ypinetree.or.kr:443/content/01news/01_01.php", stats: "30일 10, 규칙제외 0/10, 최신 2026-11-17", note: 찾은 게시판이 '복지관소식' — 공지 게시판인지 확인}
+  - {kind: 시니어클럽, name: 경기성남시니어클럽, status: stale, parser: dated_list, list_url: "https://sncsc.or.kr/notice", stats: "30일 0, 규칙제외 0/11, 최신 2026-07-22", note: 찾은 게시판(알림.소통마당)의 최근 글이 119일 전}
+  - {kind: 시니어클럽, name: 경기성남시분당시니어클럽, status: ok, parser: g5, list_url: "https://www.sbdsenior.or.kr/gboard/bbs/board.php?bo_table=notice", stats: "30일 7, 규칙제외 3/10, 최신 2026-11-18"}
+  # ── 수원시 (7) ──
+  - {kind: 복지관, name: SK청솔노인복지관, status: ok, parser: dated_list, list_url: "http://scsnoin.or.kr/?state=notice"}
+  - {kind: 복지관, name: 밤밭노인복지관, status: blocked, home: "http://www.bambat.org/", note: 403 (맥에서도)}
+  - {kind: 복지관, name: 버드내노인복지관, status: todo, parser: anyboard, home: "http://www.budnae.or.kr/main/main.html", note: 메뉴가 스크립트로만 그려짐. boardID www1~40에 게시판 없음 — 브라우저로 확인}
+  - {kind: 복지관, name: 서호노인복지관, status: ok, parser: dated_list, tls: chain, list_url: "https://www.seoho.or.kr/well/board/notice_list.jsp", ca_issuer: "http://cacerts.digicert.com/RapidSSLG5TLSRSA4096SHA3842022CA1.crt"}
+  - {kind: 복지관, name: 광교노인복지관, status: blocked, home: "http://www.ggsenior.or.kr/", note: 403}
+  - {kind: 복지관, name: 팔달노인복지관, status: ok, parser: dated_list, list_url: "http://www.pdsenior.or.kr/paldalintro/paldal_notice.jsp"}
+  - {kind: 시니어클럽, name: 경기수원시니어클럽, status: todo, home: "http://www.swsc.co.kr", note: 접속 오류 SSLError}
+  # ── 남양주시 (5) ──
+  - {kind: 복지관, name: 해피누리노인복지관, status: ok, parser: g5, list_url: "http://www.js1004.kr/bbs/board.php?bo_table=notice_new", stats: "30일 7, 규칙제외 5/14, 최신 2026-11-17"}
+  - {kind: 복지관, name: 남양주시노인복지관, status: todo, home: "https://www.nyjsw.or.kr/main/main.html", note: 공지 게시판을 못 찾음 (메뉴가 스크립트·이미지일 수 있음)}
+  - {kind: 복지관, name: 남양주시동부노인복지관, status: todo, parser: bid, list_url: "https://www.dongbusenior.or.kr/bbs/?bid=notice", stats: "30일 4, 규칙제외 2/21, 최신 2026-11-10", note: 찾은 게시판이 '복지관 소식' — 공지 게시판인지 확인}
+  - {kind: 복지관, name: 남양주시다산노인복지관, status: todo, home: "http://www.dasanswc.or.kr/", note: 공지 게시판을 못 찾음 (메뉴가 스크립트·이미지일 수 있음)}
+  - {kind: 시니어클럽, name: 경기남양주시니어클럽, status: ok, parser: g5, list_url: "https://www.nyjcsc.kr/4010", stats: "30일 2, 규칙제외 13/15, 최신 2026-11-10"}
+  # ── 평택시 (5) ──
+  - {kind: 복지관, name: 평택팽성노인복지관, status: todo, parser: g5, list_url: "https://pssenior.or.kr:41006/bbs/board.php?bo_table=sub04_01", stats: "30일 3, 규칙제외 10/19, 최신 2026-11-04", note: 찾은 게시판이 '복지관 소식' — 공지 게시판인지 확인}
+  - {kind: 복지관, name: 평택남부노인복지관, status: ok, parser: g5, list_url: "https://www.ptsenior.or.kr/notice", stats: "30일 2, 규칙제외 5/15, 최신 2026-11-10"}
+  - {kind: 복지관, name: 평택북부노인복지관, status: ok, parser: g5, list_url: "https://bbnoin.or.kr:41004/bbs/board.php?bo_table=bbnotice", stats: "30일 3, 규칙제외 10/15, 최신 2026-11-06"}
+  - {kind: 복지관, name: 평택서부노인복지관, status: ok, parser: g5, list_url: "http://www.sbnoin.net/bbs/board.php?bo_table=sub05_01", stats: "30일 8, 규칙제외 3/17, 최신 2026-11-18"}
+  - {kind: 시니어클럽, name: 경기평택시니어클럽, status: todo, home: "http://www.ptseniorclub.or.kr/main/main.html", note: 공지 게시판을 못 찾음 (메뉴가 스크립트·이미지일 수 있음)}
+  # ── 화성시 (5) ──
+  - {kind: 복지관, name: 화성시동탄노인복지관, status: ok, parser: json_api, list_url: "https://www.dtsenior.or.kr/api/bbs/1.0/base?BBS_CD=001&PAGE_NO=1&PAGE_SIZE=20", note: "Accept: application/json + X-Requested-With: XMLHttpRequest 헤더 필요. 필드 SJ(제목)·REG_DT(등록일)·CNTN(본문)·SNTNC_NO(글번호), FIXING_YN=고정글"}
+  - {kind: 복지관, name: 화성시남부노인복지관, status: ok, parser: dated_list, list_url: "https://www.hssenior.or.kr/notice", stats: "30일 4, 규칙제외 10/21, 최신 2026-11-10"}
+  - {kind: 복지관, name: 화성시서부노인복지관, status: stale, parser: g5, list_url: "https://hs-seobu.or.kr/notice", stats: "30일 0, 규칙제외 7/15, 최신 2026-08-28", note: 찾은 게시판(공지사항)의 최근 글이 82일 전}
+  - {kind: 복지관, name: 화성시정조효노인복지관, status: todo, home: "https://jjhyo.or.kr/index.do", note: 공지 게시판을 못 찾음 (메뉴가 스크립트·이미지일 수 있음)}
+  - {kind: 시니어클럽, name: 경기화성시니어클럽, status: ok, parser: bid, list_url: "https://www.hsseniorclub.or.kr/bbs/?bid=notice", stats: "30일 9, 규칙제외 15/22, 최신 2026-11-13"}
+  # ── 고양시 (4) ──
+  - {kind: 복지관, name: 고양시대화노인종합복지관, status: ok, parser: dated_list, list_url: "https://senior-edu.net/guide/notice.php", note: 본 사이트 community/notice.php는 2026-09 이후 글 없음. 활동은 선배시민 사이트(senior-edu.net)에 올라옴 — 어느 쪽을 볼지 결정}
+  - {kind: 복지관, name: 고양시덕양노인종합복지관, status: todo, home: "http://withnoin.org/main/noresize.php", note: 공지 게시판을 못 찾음 (메뉴가 스크립트·이미지일 수 있음)}
+  - {kind: 복지관, name: 고양시일산노인종합복지관, status: blocked, home: "http://ilsansenior.org/", note: 403}
+  - {kind: 시니어클럽, name: 경기고양시니어클럽, status: todo, home: "https://www.goyangsenior.com/", note: 공지 게시판을 못 찾음 (메뉴가 스크립트·이미지일 수 있음)}
+  # ── 시흥시 (4) ──
+  - {kind: 복지관, name: 시흥시노인종합복지관, status: todo, home: "http://shsenior.or.kr/main/", note: 공지 게시판을 못 찾음 (메뉴가 스크립트·이미지일 수 있음)}
+  - {kind: 복지관, name: 시흥시북부노인복지관, status: none, note: 홈페이지 없음}
+  - {kind: 복지관, name: 시흥시남부노인복지관, status: none, home: "https://blog.naver.com/snbwc", note: 블로그만 있음}
+  - {kind: 시니어클럽, name: 경기시흥시니어클럽, status: stale, parser: bid, list_url: "https://www.shcsc.or.kr/bbs/?bid=notice", stats: "30일 0, 규칙제외 11/20, 최신 2026-09-29", note: 찾은 게시판(공지사항)의 최근 글이 50일 전}
+  # ── 안산시 (4) ──
+  - {kind: 복지관, name: 단원구노인복지관, status: todo, home: "https://www.dwnoin.or.kr/main/main.html", note: 공지 게시판을 못 찾음 (메뉴가 스크립트·이미지일 수 있음)}
+  - {kind: 복지관, name: 안산시상록구노인복지관, status: todo, home: "http://www.ansansenior.or.kr/main/main.php", note: 접속 오류 ConnectTimeout}
+  - {kind: 시니어클럽, name: 경기상록시니어클럽, status: todo, home: "http://snsc8161.or.kr/", note: 공지 게시판을 못 찾음 (메뉴가 스크립트·이미지일 수 있음)}
+  - {kind: 시니어클럽, name: 경기단원시니어클럽, status: blocked, home: "http://www.ansancsc.or.kr/", note: 403}
+  # ── 용인시 (4) ──
+  - {kind: 복지관, name: 용인시기흥노인복지관, status: ok, parser: anyboard, list_url: "https://www.ygsenior.or.kr/main/sub.html?boardID=www14", note: 날짜 표기 형식이 은평과 다름 — 파서에서 처리}
+  - {kind: 복지관, name: 용인시수지노인복지관, status: blocked, home: "https://sujibokji.or.kr/main.php#1", note: 403}
+  - {kind: 복지관, name: 용인시처인노인복지관, status: ok, parser: dated_list, list_url: "http://www.yiswc.or.kr/News_01.php", stats: "30일 13, 규칙제외 1/26, 최신 2026-11-17"}
+  - {kind: 시니어클럽, name: 경기용인시니어클럽, status: ok, parser: dated_list, list_url: "https://www.yisenior.com/board/index.html?id=notice", stats: "30일 2, 규칙제외 5/17, 최신 2026-11-16"}
+  # ── 의정부시 (4) ──
+  - {kind: 복지관, name: 송산노인종합복지관, status: stale, parser: dated_list, list_url: "https://songsan.ne.kr/notice_lib", stats: "30일 0, 규칙제외 0/13, 최신 2024-01-03", note: 찾은 게시판(도서관 공지사항)의 최근 글이 1050일 전}
+  - {kind: 복지관, name: 신곡노인종합복지관, status: todo, parser: bid, list_url: "https://sgwelfare.org/bbs/?bid=notice", stats: "30일 0, 규칙제외 18/20, 최신 2026-10-14", note: 찾은 게시판이 '새소식' — 공지 게시판인지 확인}
+  - {kind: 복지관, name: 의정부노인종합복지관, status: todo, home: "https://uswc4u.or.kr/main/main.html", note: 공지 게시판을 못 찾음 (메뉴가 스크립트·이미지일 수 있음)}
+  - {kind: 시니어클럽, name: 경기의정부시니어클럽, status: ok, parser: dated_list, list_url: "https://ucsc4u.or.kr/20", stats: "30일 4, 규칙제외 8/10, 최신 2026-11-11"}
+  # ── 광명시 (3) ──
+  - {kind: 복지관, name: 광명시립소하노인종합복지관, status: blocked, home: "http://gmsenior.or.kr", note: 403}
+  - {kind: 복지관, name: 광명시립하안노인종합복지관, status: blocked, home: "http://www.haansenior.or.kr/", note: 403}
+  - {kind: 시니어클럽, name: 경기광명시니어클럽, status: todo, home: "https://www.gmsjob.co.kr/", note: 공지 게시판을 못 찾음 (메뉴가 스크립트·이미지일 수 있음)}
+  # ── 군포시 (3) ──
+  - {kind: 복지관, name: 군포시노인복지관, status: todo, home: "http://www.gpbokji.org/", note: 접속 오류 TooManyRedirects}
+  - {kind: 복지관, name: 군포시늘푸른노인복지관, status: todo, home: "http://www.nprsenior.or.kr", note: 접속 오류 ReadTimeout}
+  - {kind: 시니어클럽, name: 경기군포시니어클럽, status: todo, home: "https://www.gunpocsc.org/main/main.html", note: 공지 게시판을 못 찾음 (메뉴가 스크립트·이미지일 수 있음)}
+  # ── 김포시 (3) ──
+  - {kind: 복지관, name: 김포시노인종합복지관, status: ok, parser: g5, list_url: "https://gimposenior.org/bbs/board.php?bo_table=0501", stats: "30일 7, 규칙제외 3/15, 최신 2026-11-10"}
+  - {kind: 복지관, name: 김포시북부노인복지관, status: ok, parser: bid, list_url: "https://www.gpnsenior.org/bbs/?bid=join", stats: "30일 6, 규칙제외 0/21, 최신 2026-11-17"}
+  - {kind: 시니어클럽, name: 경기김포시니어클럽, status: ok, parser: dated_list, list_url: "http://gpsenior.or.kr/sub/noti_notice.html", stats: "30일 6, 규칙제외 8/12, 최신 2026-11-18"}
+  # ── 안양시 (3) ──
+  - {kind: 복지관, name: 안양시노인종합복지관, status: todo, home: "https://www.aysilver.kr/main/main.html", note: 공지 게시판을 못 찾음 (메뉴가 스크립트·이미지일 수 있음)}
+  - {kind: 복지관, name: 비산노인종합복지관, status: none, note: 홈페이지 없음}
+  - {kind: 시니어클럽, name: 경기안양시니어클럽, status: todo, home: "https://www.seniorhappytown.or.kr/main/main.html", note: 공지 게시판을 못 찾음 (메뉴가 스크립트·이미지일 수 있음)}
+  # ── 양주시 (3) ──
+  - {kind: 복지관, name: 양주시회천노인복지관, status: todo, home: "http://yjhcsenior.or.kr", note: 공지 게시판을 못 찾음 (메뉴가 스크립트·이미지일 수 있음)}
+  - {kind: 복지관, name: 양주시희망노인복지관, status: ok, parser: g5, list_url: "https://www.yangjuhm.or.kr/bbs/board.php?bo_table=participants", stats: "30일 8, 규칙제외 0/16, 최신 2026-11-17"}
+  - {kind: 시니어클럽, name: 경기양주시니어클럽, status: todo, home: "https://www.yjcsc7080.org/main/main.html", note: 공지 게시판을 못 찾음 (메뉴가 스크립트·이미지일 수 있음)}
+  # ── 의왕시 (3) ──
+  - {kind: 복지관, name: 의왕시사랑채노인복지관, status: todo, home: "http://www.noinlove.or.kr/", note: 접속 오류 ConnectTimeout}
+  - {kind: 복지관, name: 의왕시아름채노인복지관, status: ok, parser: bid, list_url: "https://uwsenior.or.kr/bbs/?bid=notice", stats: "30일 4, 규칙제외 3/22, 최신 2026-11-09"}
+  - {kind: 시니어클럽, name: 경기의왕시니어클럽, status: ok, parser: bid, list_url: "https://www.uwsc.or.kr/bbs/?bid=notice", stats: "30일 1, 규칙제외 6/24, 최신 2026-11-16"}
+  # ── 이천시 (3) ──
+  - {kind: 복지관, name: 이천시노인종합복지관, status: blocked, home: "http://www.ichonold.or.kr/main.asp", note: 403}
+  - {kind: 복지관, name: 이천시청미노인복지관, status: ok, parser: dated_list, list_url: "https://cmnoin.or.kr/109", stats: "30일 5, 규칙제외 0/9, 최신 2026-11-12"}
+  - {kind: 시니어클럽, name: 경기이천시니어클럽, status: todo, home: "http://www.ichcsc.org/main/main.html", note: 공지 게시판을 못 찾음 (메뉴가 스크립트·이미지일 수 있음)}
+  # ── 파주시 (3) ──
+  - {kind: 복지관, name: 파주시노인복지관, status: ok, parser: g5, list_url: "http://www.pajusenior.or.kr/notice"}
+  - {kind: 복지관, name: 운정다누림노인복지관, status: ok, parser: dated_list, list_url: "https://ujdanurim.or.kr/index?category=78V73c8K1w", stats: "30일 7, 규칙제외 1/11, 최신 2026-11-10"}
+  - {kind: 시니어클럽, name: 경기파주시니어클럽, status: ok, parser: dated_list, list_url: "https://pjsenior.or.kr/53", stats: "30일 8, 규칙제외 10/10, 최신 2026-11-13"}
+  # ── 가평군 (2) ──
+  - {kind: 복지관, name: 가평군노인복지관, status: ok, parser: dated_list, list_url: "http://gpsilver.org/home/?page_id=86", stats: "30일 1, 규칙제외 8/15, 최신 2026-11-06"}
+  - {kind: 복지관, name: 청평노인복지관, status: todo, home: "https://www.8879.or.kr/main/main.html", note: 공지 게시판을 못 찾음 (메뉴가 스크립트·이미지일 수 있음)}
+  # ── 광주시 (2) ──
+  - {kind: 복지관, name: 광주시노인복지관, status: ok, parser: dated_list, list_url: "https://www.gjswc.kr/gjnoin/sub3_1.do", stats: "30일 8, 규칙제외 3/10, 최신 2026-11-18"}
+  - {kind: 시니어클럽, name: 경기광주시니어클럽, status: todo, home: "https://www.ggjcsc.or.kr/main/main.html", note: 공지 게시판을 못 찾음 (메뉴가 스크립트·이미지일 수 있음)}
+  # ── 동두천시 (2) ──
+  - {kind: 복지관, name: 동두천시노인복지관, status: blocked, home: "http://ddcnoin.org/", note: 403}
+  - {kind: 시니어클럽, name: 경기동두천시니어클럽, status: none, note: 홈페이지 없음}
+  # ── 안성시 (2) ──
+  - {kind: 복지관, name: 안성시노인복지관, status: ok, parser: g5, list_url: "http://www.anseongnoin.or.kr/bbs/board.php?bo_table=notice", stats: "30일 4, 규칙제외 7/14, 최신 2026-11-16"}
+  - {kind: 시니어클럽, name: 경기안성맞춤시니어클럽, status: ok, parser: g5, list_url: "http://xn--9i1bu2hgubj6nb7bhvfzvar60ci4f.com/bbs/board.php?bo_table=notice", stats: "30일 5, 규칙제외 8/15, 최신 2026-11-06"}
+  # ── 양평군 (2) ──
+  - {kind: 복지관, name: 양평군노인복지관, status: ok, parser: g5, list_url: "http://www.ypsilver21.or.kr/bbs/board.php?bo_table=0501", stats: "30일 8, 규칙제외 10/15, 최신 2026-11-13"}
+  - {kind: 시니어클럽, name: 경기양평시니어클럽, status: todo, parser: dated_list, list_url: "https://ypsc.kr/?page_id=2614", stats: "30일 1, 규칙제외 0/10, 최신 2026-10-29", note: 찾은 게시판이 '기관소식' — 공지 게시판인지 확인}
+  # ── 여주시 (2) ──
+  - {kind: 복지관, name: 여주시노인복지관, status: ok, parser: dated_list, list_url: "https://www.yjsilver.or.kr/board/board.php?b_id=notice", stats: "30일 4, 규칙제외 7/19, 최신 2026-11-17"}
+  - {kind: 시니어클럽, name: 경기여주시니어클럽, status: todo, home: "http://www.yjsenior.kr/main/main.html", note: 공지 게시판을 못 찾음 (메뉴가 스크립트·이미지일 수 있음)}
+  # ── 오산시 (2) ──
+  - {kind: 복지관, name: 오산노인종합복지관, status: ok, parser: bid, list_url: "https://www.osannoin.or.kr/bbs/?bid=notice", stats: "30일 2, 규칙제외 13/21, 최신 2026-11-16"}
+  - {kind: 시니어클럽, name: 경기오산시니어클럽, status: stale, parser: dated_list, list_url: "http://ossc.kr/?state=notice", stats: "30일 0, 규칙제외 4/20, 최신 2026-09-22", note: 찾은 게시판(공지사항)의 최근 글이 57일 전}
+  # ── 포천시 (2) ──
+  - {kind: 복지관, name: 포천시노인복지관, status: ok, parser: g5, list_url: "http://www.pcsc.kr/bbs/board.php?bo_table=notice", stats: "30일 8, 규칙제외 0/15, 최신 2026-11-09"}
+  - {kind: 시니어클럽, name: 경기포천시니어클럽, status: ok, parser: g5, list_url: "https://www.pocheonsc.or.kr/bbs/board.php?bo_table=new_notice", stats: "30일 2, 규칙제외 13/15, 최신 2026-11-03"}
+  # ── 하남시 (2) ──
+  - {kind: 복지관, name: 하남시미사노인복지관, status: ok, parser: dated_list, list_url: "https://misanoin.co.kr/contents.html?pageId=HWNWWCQ8591VBVE9K1DL", stats: "30일 5, 규칙제외 0/10, 최신 2026-11-04"}
+  - {kind: 시니어클럽, name: 경기하남시니어클럽, status: ok, parser: g5, list_url: "https://hnsc.or.kr/notice", stats: "30일 4, 규칙제외 14/15, 최신 2026-11-10"}
+  # ── 과천시 (1) ──
+  - {kind: 복지관, name: 과천시노인복지관, status: todo, parser: g5, list_url: "https://www.gcsilver.or.kr/bbs/board.php?bo_table=0401", stats: "30일 4, 규칙제외 1/11, 최신 2026-11-17", note: 찾은 게시판이 '복지관소식' — 공지 게시판인지 확인}
+  # ── 구리시 (1) ──
+  - {kind: 시니어클럽, name: 경기구리시니어클럽, status: none, home: "http://guricsc.tistory.com/", note: 블로그만 있음}
+  # ── 부천시 (1) ──
+  - {kind: 복지관, name: 원미·소사·오정노인복지관 + 부천시니어클럽, status: ok, parser: js_link, list_url: "https://senior.bucheon4u.kr/senior/user/bbs/BD_selectBbsList.do?q_domnCode=2&q_bbsCode=1005", note: 시 운영 공동 포털 게시판 하나에 4기관 글이 모임. 제목 앞 기관 이름(원미·소사·오정·시니어클럽)으로 출처 구분}
+  # ── 연천군 (1) ──
+  - {kind: 복지관, name: 연천군노인복지관, status: todo, home: "http://www.lycsenior.org/main/main.html", note: 공지 게시판을 못 찾음 (메뉴가 스크립트·이미지일 수 있음)}
