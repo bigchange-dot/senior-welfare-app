@@ -7,10 +7,13 @@ import 'package:google_mobile_ads/google_mobile_ads.dart';
 import 'package:timeago/timeago.dart' as timeago;
 
 import 'screens/bookmarks_screen.dart';
+import 'screens/fortune_screen.dart';
 import 'screens/home_screen.dart';
 import 'screens/settings_screen.dart';
 import 'screens/webview_screen.dart';
+import 'services/analytics_service.dart';
 import 'services/fcm_service.dart';
+import 'services/fortune_prefs.dart';
 import 'services/region_prefs.dart';
 import 'theme.dart';
 
@@ -25,6 +28,7 @@ void main() async {
   // 내 지역 설정 읽기 (v1.4 설정이 있으면 옮김) — FCM 토픽 동기화보다 먼저
   try {
     await RegionPrefs.load();
+    await FortunePrefs.load();
   } catch (e) {
     debugPrint('내 지역 설정 읽기 실패 (지역 없음으로 시작): $e');
   }
@@ -37,6 +41,9 @@ void main() async {
       await Firebase.initializeApp(
         options: DefaultFirebaseOptions.currentPlatform,
       );
+
+      // 사용 측정 — 디버그 빌드는 수집 끔 (v1.6)
+      unawaited(AnalyticsService.init());
 
       // FCM 백그라운드 핸들러 (반드시 runApp 전에 등록)
       FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
@@ -83,8 +90,12 @@ class SeniorWelfareApp extends StatelessWidget {
               url:   args['url']    ?? '',
               title: args['title']  ?? '공고 상세',
               docId: args['doc_id'] ?? '',
+              source: 'notification',
             ),
           );
+        }
+        if (settings.name == '/fortune') {
+          return MaterialPageRoute(builder: (_) => const FortuneScreen(source: 'notification'));
         }
         return null;
       },

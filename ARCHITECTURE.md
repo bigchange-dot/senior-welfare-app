@@ -214,6 +214,16 @@ def _get_db():
 - 알림 색상: `#0056B3` (Primary Blue)
 - 채널: `welfare_alerts`
 
+### 3.3a 오늘의 운세 (`fortune.py`, v1.6 — 설계 `docs/운세-설계-2026-11-18.md`)
+
+- `fortune_function`(예약 함수, 매일 07:00 KST): 오늘·내일 `fortunes/{YYYY-MM-DD}` 문서(60갑자 년주 전부, 약 30KB)를 쓰고
+  토픽 `fortune`으로 알림 1건. `system_status/fortune.last_push_date`로 하루 한 번만 보낸다. **AI·맥과 상관없이 돈다**
+- 계산: 일진·년주 → 십신 × 합·충 → 등급 3가지(좋음·보통·차분히). 문장은 `fortune_phrases.yaml`(330문장)에서
+  `sha256(날짜|년주|칸)`으로 고른다 — 같은 날·같은 년주면 언제 계산해도 같다
+- 알림: "🐵 오늘은 원숭이띠 날 · 오늘의 운세" / "44년생 … · 56년생 … · 68년생 …" (본문 40자 이내), 채널 `fortune`, 12시간 뒤 만료
+- 감시: `health_check_function`이 08시 이후 오늘 발송 기록을 확인 (`monitoring.fortune_problems`)
+- 앱: 띠·년생은 기기에만 저장. 운세 알림은 공고 알림과 따로이고 기본 꺼짐 — 첫 운세를 본 뒤 한 번 묻는다
+
 ### 3.4 Cloud Scheduler 설정
 
 | Job 이름 | 스케줄 | 시간 (KST) |
@@ -429,6 +439,8 @@ senior-welfare-app/
 │   ├── llm_judge.py               # AI 판정·요약: 규칙 필터, 프롬프트, Ollama/Gemini 호출, 결과 검사 (3.2)
 │   ├── monitoring.py              # 운영 감시: 실행 기록 + 헬스체크 (3.5)
 │   ├── log_config.py              # Cloud Logging용 JSON 로그 설정
+│   ├── fortune.py                 # 오늘의 운세: 간지 계산·문장 고르기·날짜 문서·알림 (v1.6)
+│   ├── fortune_phrases.yaml       # 운세 문장 묶음 330개
 │   ├── sources.py                 # 출처 등록표: 출처 → 지역 코드·복지관 여부 (v1.5)
 │   ├── board_sources.py           # 범용 파서로 읽는 게시판 목록 (서울 교체 4 + 경기 52기관, v1.5)
 │   ├── board_parser.py            # 범용 게시판 목록 파서 (v1.5)
@@ -451,6 +463,7 @@ senior-welfare-app/
 │   │   ├── screens/
 │   │   │   ├── home_screen.dart       # 홈(속보) 탭 — 내 지역 + [내 지역][전체][복지로] 칩 + 찜 버튼
 │   │   │   ├── region_picker_screen.dart # 내 지역 고르기 — 시·도 버튼 → 시·군·구 타일 (v1.5)
+│   │   │   ├── fortune_screen.dart    # 오늘의 운세 — 띠·년생 고르기, 운세, 알림 질문, 광고 (v1.6)
 │   │   │   ├── bookmarks_screen.dart  # 찜한 공고 탭 — SharedPreferences + Firestore 조회
 │   │   │   ├── settings_screen.dart   # 설정 탭 — 내 지역 + 복지로 알림 + 알림 ON/OFF
 │   │   │   └── webview_screen.dart    # 공고 상세 — InApp WebView + AdMob
@@ -458,7 +471,9 @@ senior-welfare-app/
 │   │   │   └── notice_card.dart     # 공고 카드 + 광고 플레이스홀더
 │   │   └── services/
 │   │       ├── fcm_service.dart     # FCM 초기화, 토픽 구독 관리
-│   │       └── region_prefs.dart    # 내 지역 설정 (홈·찜·알림 공용, v1.5)
+│   │       ├── region_prefs.dart    # 내 지역 설정 (홈·찜·알림 공용, v1.5)
+│   │       ├── fortune_prefs.dart   # 띠·년생(기기에만)·운세 알림 설정, 오늘 운세 문서 읽기 (v1.6)
+│   │       └── analytics_service.dart # Firebase Analytics 이벤트 5가지 — 띠·년생은 넣지 않음 (v1.6)
 │   └── pubspec.yaml
 │
 ├── docs/                          # 작업 인계, 경기도 확장 조사 (gyeonggi/)
@@ -507,7 +522,7 @@ senior-welfare-app/
 | v1.5.0+9 출시 (v1.4.1 포함) | Play 내부 테스트에서 지역 알림·꺼진 상태 알림 탭 확인 → 출시 → 맥 수집 `GYEONGGI=1` |
 | 경기 남은 출처 | 추가 확인 33곳 + 기흥(목록 날짜 암호화) (`docs/gyeonggi/gyeonggi_centers.yaml`) |
 | 보안 보강 | 함수 전용 서비스 계정, 앱 Android 키 제한, App Check (`docs/보안-비용-점검-2026-11-17.md`) |
-| 운세 기능 (v1.6 이후) | 설계 확정·구현 전 (`docs/운세-설계-2026-11-18.md`) |
+| 운세 기능 (v1.6) | `v1.6-fortune` 브랜치에 구현·테스트 완료 (2026-11-19). 문장 검토 → 함수·규칙 배포 → 개인정보처리방침·Play 데이터 보안 → 출시 (TODO.md) |
 
 ---
 

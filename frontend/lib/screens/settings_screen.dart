@@ -2,8 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../regions.dart';
 import '../services/fcm_service.dart';
+import '../services/fortune_prefs.dart';
 import '../services/region_prefs.dart';
 import '../theme.dart';
+import 'fortune_screen.dart';
 import 'region_picker_screen.dart';
 
 /// 설정 탭 - 내 지역(지역 선택 화면) + 알림 ON/OFF
@@ -39,6 +41,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
     // ON → 저장된 지역 설정대로 구독, OFF → 전체 토픽 해지
     await FcmService.instance.syncSubscriptions();
+  }
+
+  /// 운세 알림 스위치. 켤 때 휴대폰 알림 권한이 없으면 요청하고, 거부되면 꺼진 채로 안내
+  Future<void> _toggleFortuneNotif(bool value) async {
+    if (value && !await FcmService.instance.requestPermission()) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('휴대폰 설정에서 알림을 허용해 주세요.', style: TextStyle(fontSize: SeniorTheme.fontSM)),
+      ));
+      return;
+    }
+    await FortunePrefs.setNotif(value);
   }
 
   void _openPicker() {
@@ -109,6 +123,34 @@ class _SettingsScreenState extends State<SettingsScreen> {
             enabled:  _notifEnabled,
             onToggle: _toggleNotif,
           ),
+          const SizedBox(height: 12),
+          // 운세 알림은 공고 알림과 따로 켜고 끈다 (v1.6)
+          ValueListenableBuilder<bool>(
+            valueListenable: FortunePrefs.notif,
+            builder: (context, on, _) => _SwitchTile(
+              icon:     Icons.wb_sunny_outlined,
+              title:    '오늘의 운세 알림',
+              subtitle: on ? '매일 아침 7시에 받는 중' : '받지 않음',
+              value:    on,
+              onChanged: _toggleFortuneNotif,
+            ),
+          ),
+          const SizedBox(height: 12),
+          OutlinedButton.icon(
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const FortuneScreen(source: 'settings')),
+            ),
+            style: OutlinedButton.styleFrom(
+              minimumSize:     const Size.fromHeight(56),
+              side:            const BorderSide(color: SeniorTheme.primary, width: 2),
+              foregroundColor: SeniorTheme.primary,
+              textStyle:       const TextStyle(fontSize: SeniorTheme.fontMD, fontWeight: FontWeight.bold),
+              shape:           RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            ),
+            icon:  const Text('🔮', style: TextStyle(fontSize: 22)),
+            label: const Text('오늘의 운세 보기'),
+          ),
 
           const SizedBox(height: 36),
           const Divider(),
@@ -124,7 +166,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
           ),
           const SizedBox(height: 12),
-          const _InfoRow(label: '버전',    value: '1.5.0'),
+          const _InfoRow(label: '버전',    value: '1.6.0'),
           const _InfoRow(label: '지역',    value: '서울 · 경기'),
         ],
       ),

@@ -3,6 +3,7 @@ import 'package:google_mobile_ads/google_mobile_ads.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import '../services/ad_service.dart';
+import '../services/analytics_service.dart';
 import '../theme.dart';
 
 /// 공고 상세 WebView 화면
@@ -14,12 +15,15 @@ class WebViewScreen extends StatefulWidget {
   final String url;
   final String title;
   final String docId;
+  /// 어디서 열었는지 (Analytics notice_open): notification / list / bookmark
+  final String source;
 
   const WebViewScreen({
     super.key,
     required this.url,
     required this.title,
     required this.docId,
+    this.source = 'list',
   });
 
   @override
@@ -36,6 +40,7 @@ class _WebViewScreenState extends State<WebViewScreen> {
     super.initState();
     _initWebView();
     _loadInterstitialAd();
+    AnalyticsService.noticeOpen(widget.source);
   }
 
   @override

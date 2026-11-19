@@ -24,5 +24,10 @@ class MainActivity : FlutterActivity() {
             "welfare_alerts", "복지 공고 알림", NotificationManager.IMPORTANCE_HIGH
         ).apply { description = "내 지역 새 복지 공고" }
         manager.createNotificationChannel(notices)
+        // 운세 (v1.6): 중요도 보통 — 소리는 나지만 화면 위 팝업 없음. 휴대폰 설정에서 운세만 끌 수 있다
+        val fortune = NotificationChannel(
+            "fortune", "오늘의 운세", NotificationManager.IMPORTANCE_DEFAULT
+        ).apply { description = "매일 아침 오늘의 운세" }
+        manager.createNotificationChannel(fortune)
     }
 }

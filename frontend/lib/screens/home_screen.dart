@@ -6,6 +6,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../models/welfare_notice.dart';
 import '../regions.dart';
 import '../services/region_prefs.dart';
+import '../widgets/fortune_card.dart';
 import '../widgets/notice_card.dart';
 import '../theme.dart';
 import 'region_picker_screen.dart';
@@ -147,6 +148,9 @@ class HomeScreenState extends State<HomeScreen> {
       backgroundColor: SeniorTheme.background,
       body: Column(
         children: [
+          // ── 오늘의 운세 카드 (v1.6)
+          const FortuneCard(),
+
           // ── 내 지역 + 지역 바꾸기
           _RegionHeader(regions: _myRegions, onChange: _openPicker),
 

@@ -4,7 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../regions.dart';
+import 'fortune_prefs.dart';
 import 'region_prefs.dart';
 
 /// FCM 수신 & Deep Linking 처리 서비스
@@ -100,8 +100,9 @@ class FcmService {
     final data  = message.data;
     final url   = data['url']   as String?;
     final docId = data['doc_id'] as String?;
+    final isFortune = data['type'] == 'fortune';   // 운세 알림 → 운세 화면 (v1.6)
 
-    if (url == null || url.isEmpty) return;
+    if (!isFortune && (url == null || url.isEmpty)) return;
 
     final nav = navigatorKey.currentState;
     if (nav == null) {
@@ -114,17 +115,37 @@ class FcmService {
       return;
     }
 
+    if (isFortune) {
+      nav.pushNamed('/fortune');
+      return;
+    }
+
     debugPrint('🔗 딥링크 처리: url=$url, docId=$docId');
     nav.pushNamed(
       '/webview',
       arguments: {
-        'url':    url,
+        'url':    url!,
         'doc_id': docId ?? '',
       },
     );
   }
 
-  /// 저장된 설정에 맞춰 토픽 구독을 맞춤 (앱 시작·지역 변경·알림 ON 시 호출)
+  /// 받을 토픽 계산 (v1.6). 공고 알림(지역·all)과 운세 알림(fortune)은 따로 켜고 끈다 —
+  /// 공고 알림을 꺼도 운세는 남고, 운세를 꺼도 공고는 그대로다.
+  static Set<String> computeWanted({
+    required bool noticesEnabled,
+    required List<String> regions,
+    required bool bokjiro,
+    required bool fortune,
+  }) =>
+      {
+        if (noticesEnabled) ...RegionPrefs.wantedTopics(regions: regions, bokjiro: bokjiro),
+        if (fortune) fortuneTopic,
+      };
+
+  static const String fortuneTopic = 'fortune';
+
+  /// 저장된 설정에 맞춰 토픽 구독을 맞춤 (앱 시작·지역 변경·알림 ON/OFF 시 호출)
   ///
   /// 중복 알림 방지: 서버는 모든 공고를 `all`과 지역 토픽에 동시 발송하므로
   /// 지역을 하나라도 고른 사용자는 `all`을 해지하고 지역 토픽(+복지로)만 구독한다.
@@ -134,15 +155,12 @@ class FcmService {
     if (fcm == null) return;
 
     try {
-      final prefs   = await SharedPreferences.getInstance();
-      final enabled = prefs.getBool('notif_enabled') ?? true;
-      if (!enabled) {
-        await unsubscribeAll();
-        return;
-      }
-      final wanted = RegionPrefs.wantedTopics(
+      final prefs  = await SharedPreferences.getInstance();
+      final wanted = computeWanted(
+        noticesEnabled: prefs.getBool('notif_enabled') ?? true,
         regions: RegionPrefs.selected.value,
         bokjiro: RegionPrefs.bokjiroNotif.value,
+        fortune: FortunePrefs.notif.value,
       );
       final previous = (prefs.getStringList(_subscribedKey) ?? _legacyTopics).toSet();
 
@@ -167,28 +185,24 @@ class FcmService {
         }
       }));
       await prefs.setStringList(_subscribedKey, {...wanted, ...failedUnsub}.toList());
-      debugPrint('✅ FCM 토픽 동기화: ${wanted.join(', ')}');
+      debugPrint('✅ FCM 토픽 동기화: ${wanted.isEmpty ? '(없음)' : wanted.join(', ')}');
     } catch (e) {
       debugPrint('FcmService syncSubscriptions 오류: $e');
     }
   }
 
-  /// 모든 알림 구독 해지 (알림 OFF) — 드문 동작이라 목록 전체를 해지해 확실히 끈다
-  Future<void> unsubscribeAll() async {
+  /// 알림 권한 요청 (운세 알림을 켤 때). 허용되면 true
+  Future<bool> requestPermission() async {
     final fcm = _fcm;
-    if (fcm == null) return;
-
-    final topics = {...allTopics, ..._legacyTopics};
-    for (final topic in topics) {
-      try {
-        await fcm.unsubscribeFromTopic(topic);
-      } catch (e) {
-        debugPrint('FCM 토픽 해지 실패 [$topic]: $e');
-      }
+    if (fcm == null) return false;
+    try {
+      final settings = await fcm.requestPermission(alert: true, badge: true, sound: true);
+      return settings.authorizationStatus == AuthorizationStatus.authorized ||
+          settings.authorizationStatus == AuthorizationStatus.provisional;
+    } catch (e) {
+      debugPrint('FCM 권한 요청 실패: $e');
+      return false;
     }
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setStringList(_subscribedKey, const []);
-    debugPrint('🚫 모든 FCM 토픽 해지 (${topics.length}개)');
   }
 
   void dispose() {

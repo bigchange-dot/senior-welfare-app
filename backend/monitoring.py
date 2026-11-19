@@ -106,6 +106,20 @@ def find_problems(status: dict | None, latest_notice_at: datetime | None, now: d
     return problems
 
 
+def fortune_problems(db, now: datetime) -> list[str]:
+    """운세 알림(매일 07:00)이 오늘 나갔는지. 운세 함수를 배포하기 전(기록 문서 없음)에는 검사하지 않는다"""
+    snap = db.collection(STATUS_COLLECTION).document("fortune").get()
+    if not snap.exists:
+        return []
+    today = now.astimezone(KST)
+    if today.hour < 8:
+        return []
+    last = (snap.to_dict() or {}).get("last_push_date")
+    if last != today.strftime("%Y-%m-%d"):
+        return [f"오늘 운세 알림이 발송되지 않음 (마지막 발송 {last or '없음'})"]
+    return []
+
+
 def check_pipeline_health(db=None, now: datetime | None = None) -> list[str]:
     """헬스체크 진입점. 문제가 있으면 ERROR 로그(HEALTH_ALERT)를 남기고 문제 목록을 돌려준다."""
     db  = db or firestore.client()
@@ -123,6 +137,7 @@ def check_pipeline_health(db=None, now: datetime | None = None) -> list[str]:
     latest_notice_at = latest[0].to_dict().get("timestamp") if latest else None
 
     problems = find_problems(status, latest_notice_at, now)
+    problems += fortune_problems(db, now)
 
     # 참고 정보: 이번 실행에서 0건이었거나 실패한 출처 (알림 조건은 아님, 메일 본문에만 포함)
     note = ""

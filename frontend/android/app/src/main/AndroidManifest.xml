@@ -35,6 +35,14 @@
         <meta-data
             android:name="com.google.firebase.messaging.default_notification_channel_id"
             android:value="welfare_alerts" />
+        <!-- 알림 기본 아이콘·색 (2026-11-19) -->
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_icon"
+            android:resource="@drawable/ic_notification" />
+        <!-- Analytics는 광고 ID를 모으지 않는다 (v1.6, AdMob은 원래대로) -->
+        <meta-data
+            android:name="google_analytics_adid_collection_enabled"
+            android:value="false" />
         <!-- AdMob App ID -->
         <meta-data
             android:name="com.google.android.gms.ads.APPLICATION_ID"

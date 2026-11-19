@@ -104,6 +104,7 @@ class BookmarksScreenState extends State<BookmarksScreen> {
           url:   notice.url,
           title: notice.aiSummary,
           docId: notice.id,
+          source: 'bookmark',
         ),
       ),
     );

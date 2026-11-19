@@ -8,6 +8,12 @@ service cloud.firestore {
       allow write: if false;        // 클라이언트 직접 쓰기 차단 (Admin SDK만 쓰기)
     }
 
+    // fortunes: 오늘의 운세 날짜 문서 (v1.6) — 앱은 읽기만, 쓰기는 서버만
+    match /fortunes/{date} {
+      allow read: if true;
+      allow write: if false;
+    }
+
     // 기타 모든 경로 차단
     match /{document=**} {
       allow read, write: if false;
