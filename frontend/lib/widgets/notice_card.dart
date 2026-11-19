@@ -6,10 +6,35 @@ import '../models/welfare_notice.dart';
 import '../services/ad_service.dart';
 import '../theme.dart';
 
+/// 요약 맨 앞 이모지 → 분야 이름. 서버(llm_judge.pick_emoji)가 요약 앞에 이모지를 하나 붙여 저장한다.
+/// 화면에서는 이모지를 떼고, 분야를 알 수 있으면 출처 옆에 작은 글자로 보여 준다 (v1.6 다듬기).
+const Map<String, String> _categoryOfEmoji = {
+  '💼': '일자리', '👷': '일자리',
+  '🩺': '건강', '🏥': '건강', '💉': '건강', '🦷': '건강', '🧠': '건강', '🏃': '건강',
+  '📚': '교육', '📱': '교육', '💻': '교육',
+  '🎉': '행사', '🎵': '문화', '🎨': '문화', '🎬': '문화',
+  '💬': '상담', '⚖️': '권익', '🤝': '나눔', '💰': '지원금', '🏠': '주거', '🍚': '식사',
+};
+
+final RegExp _leadingEmoji = RegExp(
+  r'^(?:[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{2190}-\u{21FF}\u{2B00}-\u{2BFF}]\uFE0F?\u200D?)+\s*',
+  unicode: true,
+);
+
+/// 요약에서 맨 앞 이모지를 떼어 (분야 이름 또는 null, 본문)으로 나눈다
+(String?, String) splitSummary(String summary) {
+  final m = _leadingEmoji.firstMatch(summary);
+  if (m == null) return (null, summary);
+  final emoji = m.group(0)!.trim();
+  final text = summary.substring(m.end).trim();
+  if (text.isEmpty) return (null, summary);
+  return (_categoryOfEmoji[emoji], text);
+}
+
 /// 공고 카드 위젯 (Senior-Friendly)
-/// - 상하 20px 넉넉한 터치 영역
-/// - ai_summary → 초대형 굵은 폰트
-/// - 출처 배지 (색상 구분)
+/// - 넉넉한 터치 영역
+/// - ai_summary → 초대형 굵은 폰트 (앞 이모지는 떼고 보여 줌)
+/// - 출처 · 분야 (한 가지 색)
 /// - 원본 제목 서브텍스트
 /// - 찜 버튼 (onBookmark 제공 시 표시)
 class NoticeCard extends StatelessWidget {
@@ -28,15 +53,13 @@ class NoticeCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final (category, summary) = splitSummary(notice.aiSummary);
     return Card(
       child: InkWell(
         onTap: onTap,
         borderRadius: BorderRadius.circular(SeniorTheme.cardRadius),
         child: Padding(
-          padding: const EdgeInsets.symmetric(
-            vertical:   SeniorTheme.touchPaddingV,
-            horizontal: SeniorTheme.touchPaddingH,
-          ),
+          padding: const EdgeInsets.fromLTRB(SeniorTheme.touchPaddingH, 10, 8, 14),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -48,7 +71,7 @@ class NoticeCard extends StatelessWidget {
                   Expanded(
                     child: Align(
                       alignment: Alignment.centerLeft,
-                      child: _SourceBadge(source: notice.source),
+                      child: _SourceBadge(source: notice.source, category: category),
                     ),
                   ),
                   if (onBookmark != null)
@@ -65,11 +88,11 @@ class NoticeCard extends StatelessWidget {
                     ),
                 ],
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: 4),
 
               // AI 속보 요약 — 메인 텍스트 (대형 굵은 폰트)
               Text(
-                notice.aiSummary,
+                summary,
                 style: const TextStyle(
                   fontSize:   SeniorTheme.fontLG,
                   fontWeight: FontWeight.w800,
@@ -86,30 +109,15 @@ class NoticeCard extends StatelessWidget {
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: 8),
 
-              // 등록 시각 + 자세히 보기
-              Row(
-                children: [
-                  Flexible(
-                    child: Text(
-                      timeago.format(notice.timestamp, locale: 'ko'),
-                      style: const TextStyle(
-                        fontSize: SeniorTheme.fontCaption,
-                        color:    SeniorTheme.textSecond,
-                      ),
-                    ),
-                  ),
-                  const Spacer(),
-                  Text(
-                    '자세히 보기 →',
-                    style: TextStyle(
-                      fontSize:   SeniorTheme.fontSM,
-                      color:      SeniorTheme.primary,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                ],
+              // 등록 시각 (카드 전체가 눌리므로 '자세히 보기' 글자는 뺌 — v1.6 다듬기)
+              Text(
+                timeago.format(notice.timestamp, locale: 'ko'),
+                style: const TextStyle(
+                  fontSize: SeniorTheme.fontCaption,
+                  color:    SeniorTheme.textSecond,
+                ),
               ),
             ],
           ),
@@ -119,31 +127,32 @@ class NoticeCard extends StatelessWidget {
   }
 }
 
-/// 출처 배지 위젯
+/// 출처 · 분야 — 색은 한 가지 (예전엔 출처마다 색이 달라 목록이 어수선했음, v1.6 다듬기)
 class _SourceBadge extends StatelessWidget {
   final String source;
-  const _SourceBadge({required this.source});
+  final String? category;
+  const _SourceBadge({required this.source, this.category});
 
   @override
   Widget build(BuildContext context) {
-    final color = SeniorTheme.sourceColor(source);
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: color.withValues(alpha: 0.4)),
+    return Text.rich(
+      TextSpan(
+        children: [
+          TextSpan(text: source),
+          if (category != null)
+            TextSpan(
+              text: '  ·  $category',
+              style: const TextStyle(color: SeniorTheme.textSecond, fontWeight: FontWeight.w600),
+            ),
+        ],
       ),
-      child: Text(
-        source,
-        // 글자를 2배로 키운 좁은 폰에선 "서대문노인복지관"도 한 줄에 안 들어가 잘렸음 → 두 줄까지 허용
-        maxLines: 2,
-        overflow: TextOverflow.ellipsis,
-        style: TextStyle(
-          fontSize:   SeniorTheme.fontCaption,
-          color:      color,
-          fontWeight: FontWeight.bold,
-        ),
+      // 글자를 2배로 키운 좁은 폰에선 "서대문노인복지관 · 교육"이 두 줄에도 안 들어감 → 세 줄까지 허용
+      maxLines: 3,
+      overflow: TextOverflow.ellipsis,
+      style: const TextStyle(
+        fontSize:   SeniorTheme.fontCaption,
+        color:      SeniorTheme.primary,
+        fontWeight: FontWeight.bold,
       ),
     );
   }

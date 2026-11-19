@@ -57,11 +57,12 @@ void main() {
 
   testWidgets('요약·제목·출처·시간을 보여 준다', (tester) async {
     await pumpCard(tester);
-    expect(find.text(notice.aiSummary), findsOneWidget);
+    // 요약 앞 이모지는 떼고, 분야는 출처 옆에 글자로 (v1.6 다듬기)
+    expect(find.text('가족과 행복한 노후를 위한 신탁 특별강좌 참여자 모집'), findsOneWidget);
     expect(find.text(notice.title), findsOneWidget);
-    expect(find.text('서대문노인복지관'), findsOneWidget);
+    expect(find.textContaining('서대문노인복지관', findRichText: true), findsOneWidget);
+    expect(find.textContaining('교육', findRichText: true), findsWidgets);
     expect(find.text('5시간 전'), findsOneWidget);
-    expect(find.text('자세히 보기 →'), findsOneWidget);
   });
 
   testWidgets('찜 버튼은 카드 누름과 따로 동작하고 터치 영역이 48 이상', (tester) async {
@@ -76,16 +77,25 @@ void main() {
     expect(bookmarks, 1);
     expect(taps, 0);          // 예전엔 28px 아이콘을 빗나가면 카드가 눌려 상세가 열렸음
 
-    await tester.tap(find.text(notice.aiSummary));
+    await tester.tap(find.text('가족과 행복한 노후를 위한 신탁 특별강좌 참여자 모집'));
     expect(taps, 1);
   });
 
   testWidgets('좁은 폰 + 글자 2배에서도 넘치지 않고 출처가 다 보인다', (tester) async {
     await pumpCard(tester, width: 360, textScale: 2.0);
     expect(tester.takeException(), isNull);   // RenderFlex overflow가 나면 여기서 잡힘
-    expect(find.text('서대문노인복지관'), findsOneWidget);
+    final badgeFinder = find.textContaining('서대문노인복지관', findRichText: true);
+    expect(badgeFinder, findsOneWidget);
 
-    final badge = tester.renderObject<RenderParagraph>(find.text('서대문노인복지관'));
+    final badge = tester.renderObject<RenderParagraph>(badgeFinder);
     expect(badge.didExceedMaxLines, isFalse); // "서대문노…"처럼 잘리지 않음
+  });
+
+  test('요약 앞 이모지를 분야로 바꾼다', () {
+    expect(splitSummary('💼 2027년 노인일자리 참여자 모집'), ('일자리', '2027년 노인일자리 참여자 모집'));
+    expect(splitSummary('📢 11월 행사 안내'), (null, '11월 행사 안내'));          // 📢는 분야 없음
+    expect(splitSummary('⚖️ 양성평등교육 참여자 모집'), ('권익', '양성평등교육 참여자 모집'));
+    expect(splitSummary('스마트폰 교실 모집'), (null, '스마트폰 교실 모집'));     // 이모지 없는 요약
+    expect(splitSummary('📢'), (null, '📢'));
   });
 }

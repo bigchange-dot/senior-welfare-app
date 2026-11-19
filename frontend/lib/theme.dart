@@ -117,7 +117,7 @@ class SeniorTheme {
         borderRadius: BorderRadius.circular(cardRadius),
         side: const BorderSide(color: divider), // #E0E0E0
       ),
-      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 5),   // 카드 사이 간격 줄임 (v1.6 다듬기)
     ),
 
     // ElevatedButton (신청하기 등)

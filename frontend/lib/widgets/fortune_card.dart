@@ -56,42 +56,35 @@ class _CardShell extends StatelessWidget {
 
   const _CardShell({required this.emoji, required this.title, required this.subtitle, required this.onTap});
 
+  /// 지역 줄과 같은 흰 바탕의 한 줄 (예전 노란 상자는 홈 맨 위에서 혼자 튀었음, v1.6 다듬기)
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
-      child: Material(
-        color: const Color(0xFFFFF8E1),
-        borderRadius: BorderRadius.circular(SeniorTheme.cardRadius),
-        child: InkWell(
-          borderRadius: BorderRadius.circular(SeniorTheme.cardRadius),
-          onTap: onTap,
-          child: Container(
-            constraints: const BoxConstraints(minHeight: 64),
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(SeniorTheme.cardRadius),
-              border: Border.all(color: const Color(0xFFFFE082), width: 1.5),
-            ),
-            child: Row(
-              children: [
-                Text(emoji, style: const TextStyle(fontSize: 32)),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(title,
-                          style: const TextStyle(fontSize: SeniorTheme.fontCaption, color: SeniorTheme.textSecond)),
-                      Text(subtitle,
-                          style: const TextStyle(
-                            fontSize: SeniorTheme.fontMD, fontWeight: FontWeight.bold, color: SeniorTheme.textPrimary)),
-                    ],
-                  ),
+    return Material(
+      color: SeniorTheme.surface,
+      child: InkWell(
+        onTap: onTap,
+        child: Container(
+          constraints: const BoxConstraints(minHeight: 60),
+          padding: const EdgeInsets.fromLTRB(16, 10, 8, 10),
+          decoration: const BoxDecoration(border: Border(bottom: BorderSide(color: SeniorTheme.divider))),
+          child: Row(
+            children: [
+              Text(emoji, style: const TextStyle(fontSize: 26)),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(title,
+                        style: const TextStyle(fontSize: SeniorTheme.fontCaption, color: SeniorTheme.textSecond)),
+                    Text(subtitle,
+                        style: const TextStyle(
+                          fontSize: SeniorTheme.fontMD, fontWeight: FontWeight.bold, color: SeniorTheme.textPrimary)),
+                  ],
                 ),
-                const Icon(Icons.chevron_right, size: 30, color: SeniorTheme.textSecond),
-              ],
-            ),
+              ),
+              const Icon(Icons.chevron_right, size: 30, color: SeniorTheme.textSecond),
+            ],
           ),
         ),
       ),
