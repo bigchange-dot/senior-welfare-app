@@ -34,7 +34,9 @@ class FortuneCard extends StatelessWidget {
             return _CardShell(
               emoji: zodiacOf(year).emoji,
               title: '오늘의 운세 · ${birthLabel(year)}',
-              subtitle: entry == null ? '오늘 운세 보기' : '${entry.label} · ${entry.keyword}',
+              subtitle: entry == null
+                  ? '오늘 운세 보기'
+                  : '${entry.label} · ${entry.keyword}${entry.score > 0 ? ' · ${entry.score}점' : ''}',
               onTap: () => _open(context),
             );
           },

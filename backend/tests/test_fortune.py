@@ -71,8 +71,76 @@ def test_day_doc_shape():
     assert sorted(doc["entries"], key=int) == [str(i) for i in range(60)]
     e = doc["entries"]["32"]      # 1956 병신생 — 오늘과 같은 간지 → 비견·평
     assert (e["god"], e["relation"]) == ("비견", "평")
-    for key in ["level", "label", "headline", "keyword", "health", "family", "money", "color", "number"]:
+    for key in ["level", "label", "headline", "keyword", "health", "family", "money", "mind", "color", "number",
+                "score", "stars", "detail", "direction", "time", "food", "rank"]:
         assert e[key], key
+    assert len(e["detail"]) == 3 and set(e["stars"]) == set(F.AREA_KEYS)
+
+
+# ── 볼거리 보강 (2026-11-21): 띠 순위·점수·별·궁합 ───────────
+def _days(n, start=date(2027, 1, 1)):
+    from datetime import timedelta
+    return [start + timedelta(days=i) for i in range(n)]
+
+
+def test_ranking_is_a_permutation_and_fair():
+    from collections import Counter
+    firsts, lasts = Counter(), Counter()
+    for d in _days(120):
+        r = F.animal_ranking(d)
+        assert sorted(r) == list(range(12))
+        db = F.day_index(d) % 12
+        assert F.relation(r[0], db) == "합" and F.relation(r[-1], db) == "충"
+        firsts[r[0]] += 1
+        lasts[r[-1]] += 1
+    assert set(firsts.values()) == {10} and set(lasts.values()) == {10}     # 띠마다 12일에 한 번씩 1위·12위
+
+
+def test_ranking_rows_in_doc():
+    doc = F.build_day_doc(date(2026, 11, 18), PHRASES)
+    rows = doc["ranking"]
+    assert [r["branch"] for r in rows] == F.animal_ranking(date(2026, 11, 18))
+    assert all(r["comment"] and len(r["comment"]) <= 16 for r in rows)
+    assert len({r["comment"] for r in rows}) == 12                 # 한마디가 겹치지 않는다
+    for i, e in doc["entries"].items():
+        assert rows[e["rank"] - 1]["branch"] == int(i) % 12       # 내 순위 = 순위표의 내 띠 자리
+
+
+def test_score_and_stars_follow_level():
+    ranges = {"좋음": (80, 98), "보통": (62, 80), "차분히": (52, 61)}
+    star_ranges = {"좋음": (3, 5), "보통": (2, 4), "차분히": (2, 3)}
+    seen = set()
+    for d in _days(60):
+        doc = F.build_day_doc(d, PHRASES)
+        for e in doc["entries"].values():
+            lo, hi = ranges[e["level"]]
+            assert lo <= e["score"] <= hi, e
+            slo, shi = star_ranges[e["level"]]
+            assert all(slo <= v <= shi for v in e["stars"].values()), e
+            seen.add(e["score"])
+        first = [e for e in doc["entries"].values() if e["rank"] == 1]
+        assert all(e["level"] == "좋음" and e["score"] >= 95 for e in first)      # 1위 띠는 늘 좋은 날
+    assert len(seen) > 25                                                         # 점수가 날마다 다양하다
+
+
+def test_partners():
+    assert F.good_partners(0) == [1, 4, 8]            # 쥐: 소(육합), 용·원숭이(삼합)
+    assert F.care_partners(0) == [6, 7]               # 쥐: 말(충), 양(원진·해)
+    for b in range(12):
+        assert b not in F.good_partners(b) + F.care_partners(b)
+        assert not set(F.good_partners(b)) & set(F.care_partners(b))
+    doc = F.build_day_doc(date(2026, 11, 18), PHRASES)
+    for i, e in doc["entries"].items():
+        same = doc["entries"][str((int(i) + 12) % 60)]            # 같은 띠 다른 년생
+        assert (e["good_with"], e["care_with"]) == (same["good_with"], same["care_with"])
+        assert e["good_with"] in F.good_partners(int(i) % 12)
+
+
+def test_lucky_items():
+    doc = F.build_day_doc(date(2026, 11, 18), PHRASES)
+    for e in doc["entries"].values():
+        assert e["direction"] in F.LUCKY_DIRECTION.values()
+        assert e["time"] in F.LUCKY_TIMES and e["food"] in PHRASES["foods"]
 
 
 def test_level_mix_leans_good():
@@ -98,6 +166,10 @@ def test_phrase_counts():
     for level in F.LEVELS:
         for area in F.AREAS:
             assert len(PHRASES["areas"][level][area]) == 10, (level, area)
+        assert len(PHRASES["flow"][level]) == 12 and len(PHRASES["closing"][level]) == 8, level
+    for god in F.TEN_GODS:
+        assert len(PHRASES["advice"][god]) == 6, god
+    assert all(len(v) == 8 for v in PHRASES["rank_comments"].values()) and len(PHRASES["foods"]) == 20
 
 
 def _all_texts():
@@ -109,6 +181,12 @@ def _all_texts():
         for area, items in areas.items():
             for t in items:
                 yield f"{level}/{area}", t, None
+    for pool in ("flow", "advice", "closing", "rank_comments"):
+        for group, items in PHRASES[pool].items():
+            for t in items:
+                yield f"{pool}/{group}", t, None
+    for t in PHRASES["foods"]:
+        yield "foods", t, None
 
 
 def test_phrase_rules():
@@ -120,6 +198,12 @@ def test_phrase_rules():
             assert not any(w in keyword for w in F.FORBIDDEN_WORDS), (where, keyword)
     headlines = [t for w, t, k in _all_texts() if k is not None]
     assert all(t.endswith(("요.", "요")) for t in headlines)        # ~해요체
+    # 총운으로 이어 붙는 문장은 마침표로 끝나야 한 문단으로 읽힌다
+    for w, t, k in _all_texts():
+        if w.split("/")[0] in ("flow", "advice", "closing"):
+            assert t.endswith("요."), (w, t)
+    texts = [t for w, t, k in _all_texts()]
+    assert len(texts) == len(set(texts))                            # 같은 문장이 두 번 없다
 
 
 def test_push_body_fits_40_chars_every_day():

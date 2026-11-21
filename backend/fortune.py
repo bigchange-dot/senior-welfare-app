@@ -33,11 +33,20 @@ _HAP = {frozenset(p) for p in [(0, 1), (2, 11), (3, 10), (4, 9), (5, 8), (6, 7)]
 
 LEVELS = ["좋음", "보통", "차분히"]
 LEVEL_LABEL = {"좋음": "☀️ 좋은 날", "보통": "⛅ 무난한 날", "차분히": "🌤 천천히 가는 날"}
-AREAS = ["건강", "가족", "재물"]
+AREAS = ["건강", "가족", "재물", "마음"]
+AREA_KEYS = ["health", "family", "money", "mind"]
 
 # 행운의 색·숫자 (오행)
 LUCKY = {"목": ("초록", (3, 8)), "화": ("빨강", (2, 7)), "토": ("노랑", (5, 10)),
          "금": ("흰색", (4, 9)), "수": ("남색", (1, 6))}
+
+# 행운의 방향(오행)·시간 (볼거리 보강 2026-11-21)
+LUCKY_DIRECTION = {"목": "동쪽", "화": "남쪽", "토": "남서쪽", "금": "서쪽", "수": "북쪽"}
+LUCKY_TIMES = ["오전 7~9시", "오전 9~11시", "오전 11시~오후 1시", "오후 1~3시", "오후 3~5시", "오후 5~7시"]
+
+# 원진·해 (지지 인덱스 쌍) — '양보하면 좋은 띠' 후보. 충과 함께 쓴다
+_WONJIN = [(0, 7), (1, 6), (2, 9), (3, 8), (4, 11), (5, 10)]
+_HAE = [(0, 7), (1, 6), (2, 5), (3, 4), (8, 11), (9, 10)]
 
 # 알림에 띄울 년생: (올해 − 91) ~ (올해 − 56) — 36년 범위라 띠마다 정확히 3개
 PUSH_AGE_MIN, PUSH_AGE_MAX = 56, 91
@@ -113,9 +122,12 @@ def load_phrases(path: str = PHRASES_PATH) -> dict:
         return yaml.safe_load(f)
 
 
-def entry_for(day: date, year_idx: int, phrases: dict) -> dict:
+def entry_for(day: date, year_idx: int, phrases: dict, ranking: list[int] | None = None) -> dict:
     """년주 하나의 오늘 운세"""
     di = day_index(day)
+    ranking = ranking or animal_ranking(day)
+    my_branch = year_idx % 12
+    rank = ranking.index(my_branch) + 1
     god = ten_god(year_idx % 10, di % 10)
     rel = relation(year_idx % 12, di % 12)
     level = level_of(god, rel)
@@ -131,10 +143,95 @@ def entry_for(day: date, year_idx: int, phrases: dict) -> dict:
         "keyword": head["keyword"],
         "color": color,
         "number": _pick(list(numbers), day, year_idx, "number"),
+        # 볼거리 보강 (2026-11-21)
+        "rank": rank,
+        "score": score_of(level, rank, day, year_idx),
+        "stars": stars_of(level, day, year_idx),
+        "detail": [                               # 총운 이어지는 세 문장
+            _pick(phrases["flow"][level], day, year_idx, "flow"),
+            _pick(phrases["advice"][god], day, year_idx, "advice"),
+            _pick(phrases["closing"][level], day, year_idx, "closing"),
+        ],
+        "direction": LUCKY_DIRECTION[element],
+        "time": _pick(LUCKY_TIMES, day, year_idx, "time"),
+        "food": _pick(phrases["foods"], day, year_idx, "food"),
+        # 궁합은 띠가 같으면 같게 — 년주가 아니라 지지로 고른다 (지지 인덱스)
+        "good_with": _pick(good_partners(my_branch), day, my_branch, "good-branch"),
+        "care_with": _pick(care_partners(my_branch), day, my_branch, "care-branch"),
     }
-    for area, key in zip(AREAS, ["health", "family", "money"]):
+    for area, key in zip(AREAS, AREA_KEYS):
         entry[key] = _pick(phrases["areas"][level][area], day, year_idx, area)
     return entry
+
+
+def ranking_rows(day: date, ranking: list[int], phrases: dict) -> list[dict]:
+    """띠 순위 12줄: 지지 인덱스 + 한마디 (1~4위 상, 5~8위 중, 9~12위 하)"""
+    rows = []
+    for t, tier in enumerate(["상", "중", "하"]):
+        # 같은 날 같은 한마디가 두 번 나오지 않게, 묶음을 날짜로 섞어 앞에서부터 쓴다
+        pool = sorted(phrases["rank_comments"][tier], key=lambda c: _hash_int(f"{day.isoformat()}|rank-comment|{c}"))
+        for j, branch in enumerate(ranking[t * 4:t * 4 + 4]):
+            rows.append({"branch": branch, "comment": pool[j]})
+    return rows
+
+
+# ── 띠 순위·궁합·점수 (볼거리 보강 2026-11-21) ─────────────
+def _hash_int(text: str) -> int:
+    return int.from_bytes(hashlib.sha256(text.encode("utf-8")).digest()[:8], "big")
+
+
+def animal_ranking(day: date) -> list[int]:
+    """오늘의 띠 순위 — 지지 인덱스 12개를 1위부터.
+
+    오늘 일지와 육합인 띠가 늘 1위, 충인 띠가 늘 12위 (등급 좋음·차분히와 맞춘다).
+    삼합·오늘의 띠는 위쪽, 나머지는 날짜로 섞는다 — 띠마다 12일에 한 번은 1위가 된다."""
+    db = day_index(day) % 12
+
+    def weight(b: int) -> int:
+        jitter = _hash_int(f"{day.isoformat()}|rank|{b}") % 1000
+        rel = relation(b, db)
+        if rel == "합":
+            return 5000
+        if rel == "충":
+            return -1
+        if b == db or (b - db) % 12 in (4, 8):   # 오늘의 띠, 삼합
+            return 3000 + jitter
+        return 1000 + jitter
+
+    return sorted(range(12), key=weight, reverse=True)
+
+
+def good_partners(branch: int) -> list[int]:
+    """잘 맞는 띠 후보: 육합 하나 + 삼합 둘"""
+    hap = next(b for b in range(12) if frozenset((branch, b)) in _HAP)
+    return [hap, (branch + 4) % 12, (branch + 8) % 12]
+
+
+def care_partners(branch: int) -> list[int]:
+    """양보하면 좋은 띠 후보: 충 + 원진 + 해 (겹치면 하나로)"""
+    out = [(branch + 6) % 12]
+    for pairs in (_WONJIN, _HAE):
+        for a, b in pairs:
+            other = b if a == branch else a if b == branch else None
+            if other is not None and other not in out:
+                out.append(other)
+    return out
+
+
+def score_of(level: str, rank: int, day: date, year_idx: int) -> int:
+    """총운 점수. 등급이 폭을 정하고, 띠 순위가 높을수록 그 안에서 올라간다 (좋음 80~98, 보통 62~80, 차분히 52~61)"""
+    h = _hash_int(f"{day.isoformat()}|{year_idx}|score")
+    if level == "차분히":
+        return 52 + h % 10
+    base = 80 if level == "좋음" else 62
+    return base + round((12 - rank) * 1.4) + h % 3
+
+
+def stars_of(level: str, day: date, year_idx: int) -> dict:
+    """분야별 별 (5개 만점). 좋음 3~5, 보통 2~4, 차분히 2~3"""
+    low, high = {"좋음": (3, 5), "보통": (2, 4), "차분히": (2, 3)}[level]
+    return {key: low + _hash_int(f"{day.isoformat()}|{year_idx}|star|{key}") % (high - low + 1)
+            for key in AREA_KEYS}
 
 
 # ── 날짜 문서·알림 ─────────────────────────────────────
@@ -155,12 +252,14 @@ def push_message(day: date, entries: dict) -> dict:
 def build_day_doc(day: date, phrases: dict) -> dict:
     """fortunes/{YYYY-MM-DD} 문서 — 60갑자 년주 전부 (앱은 이 문서 1개만 읽는다)"""
     di = day_index(day)
-    entries = {str(i): entry_for(day, i, phrases) for i in range(60)}
+    ranking = animal_ranking(day)
+    entries = {str(i): entry_for(day, i, phrases, ranking) for i in range(60)}
     return {
         "date": day.isoformat(),
         "iljin": ganji(di),
         "day_animal": ANIMALS[di % 12],
         "push": push_message(day, entries),
+        "ranking": ranking_rows(day, ranking, phrases),
         "entries": entries,
     }
 

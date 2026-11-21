@@ -216,10 +216,13 @@ def _get_db():
 
 ### 3.3a 오늘의 운세 (`fortune.py`, v1.6 — 설계 `docs/운세-설계-2026-11-18.md`)
 
-- `fortune_function`(예약 함수, 매일 07:00 KST): 오늘·내일 `fortunes/{YYYY-MM-DD}` 문서(60갑자 년주 전부, 약 30KB)를 쓰고
+- `fortune_function`(예약 함수, 매일 07:00 KST): 오늘·내일 `fortunes/{YYYY-MM-DD}` 문서(60갑자 년주 전부 + 띠 순위, 약 50KB)를 쓰고
   토픽 `fortune`으로 알림 1건. `system_status/fortune.last_push_date`로 하루 한 번만 보낸다. **AI·맥과 상관없이 돈다**
-- 계산: 일진·년주 → 십신 × 합·충 → 등급 3가지(좋음·보통·차분히). 문장은 `fortune_phrases.yaml`(330문장)에서
+- 계산: 일진·년주 → 십신 × 합·충 → 등급 3가지(좋음·보통·차분히). 문장은 `fortune_phrases.yaml`(504문장)에서
   `sha256(날짜|년주|칸)`으로 고른다 — 같은 날·같은 년주면 언제 계산해도 같다
+- 볼거리 (2026-11-21 보강): 띠 순위(`animal_ranking` — 육합 띠 1위, 충 띠 12위), 총운 점수(`score_of`), 분야별 별(`stars_of`),
+  총운 이어지는 세 문장(흐름·조언·마무리), 잘 맞는 띠·양보하면 좋은 띠(지지로 고름 — 같은 띠면 같다), 행운의 방향·시간·음식.
+  앱은 내일 문서를 [내일 운세 미리 보기]를 누를 때만 읽는다
 - 알림: "🐵 오늘은 원숭이띠 날 · 오늘의 운세" / "44년생 … · 56년생 … · 68년생 …" (본문 40자 이내), 채널 `fortune`, 12시간 뒤 만료
 - 감시: `health_check_function`이 08시 이후 오늘 발송 기록을 확인 (`monitoring.fortune_problems`)
 - 앱: 띠·년생은 기기에만 저장. 운세 알림은 공고 알림과 따로이고 기본 꺼짐 — 첫 운세를 본 뒤 한 번 묻는다
@@ -440,7 +443,7 @@ senior-welfare-app/
 │   ├── monitoring.py              # 운영 감시: 실행 기록 + 헬스체크 (3.5)
 │   ├── log_config.py              # Cloud Logging용 JSON 로그 설정
 │   ├── fortune.py                 # 오늘의 운세: 간지 계산·문장 고르기·날짜 문서·알림 (v1.6)
-│   ├── fortune_phrases.yaml       # 운세 문장 묶음 330개
+│   ├── fortune_phrases.yaml       # 운세 문장 묶음 504개 (총평·분야·흐름·조언·마무리·순위 한마디·음식)
 │   ├── sources.py                 # 출처 등록표: 출처 → 지역 코드·복지관 여부 (v1.5)
 │   ├── board_sources.py           # 범용 파서로 읽는 게시판 목록 (서울 교체 4 + 경기 52기관, v1.5)
 │   ├── board_parser.py            # 범용 게시판 목록 파서 (v1.5)

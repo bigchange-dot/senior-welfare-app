@@ -65,6 +65,18 @@ class FortuneRepo {
     return _cached = FortuneDay.fromMap(data);
   }
 
+  /// 내일 운세 문서 — [내일 운세 미리 보기]를 누를 때만 읽는다 (서버가 오늘 07:00에 내일 것도 써 둔다)
+  static FortuneDay? _cachedTomorrow;
+
+  static Future<FortuneDay?> tomorrow() async {
+    final id = fortuneDocId(null, 1);
+    if (_cachedTomorrow?.date == id) return _cachedTomorrow;
+    final snap = await FirebaseFirestore.instance.collection('fortunes').doc(id).get();
+    final data = snap.data();
+    if (data == null) return null;
+    return _cachedTomorrow = FortuneDay.fromMap(data);
+  }
+
   /// 오늘(한국 시간 0시 이후) 올라온 공고 수 — 운세 화면의 [오늘 새 공고 N건 보기]
   static Future<int> todayNoticeCount() async {
     final nowKst = DateTime.now().toUtc().add(const Duration(hours: 9));

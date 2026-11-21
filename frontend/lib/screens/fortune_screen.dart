@@ -21,6 +21,7 @@ class FortuneScreen extends StatefulWidget {
 
   /// 테스트에서 Firestore·광고·알림 권한을 가짜로 바꾸는 구멍
   final Future<FortuneDay?> Function()? loadToday;
+  final Future<FortuneDay?> Function()? loadTomorrow;
   final Future<int> Function()? loadNoticeCount;
   final Future<bool> Function()? requestPermission;
   final bool adsEnabled;
@@ -29,6 +30,7 @@ class FortuneScreen extends StatefulWidget {
     super.key,
     this.source = 'home_card',
     this.loadToday,
+    this.loadTomorrow,
     this.loadNoticeCount,
     this.requestPermission,
     this.adsEnabled = true,
@@ -50,6 +52,8 @@ class _FortuneScreenState extends State<FortuneScreen> {
 
   bool _showQuestion = false;      // "내일 아침 7시에도 알려 드릴까요?"
   String? _questionResult;
+
+  Future<FortuneDay?>? _tomorrowFuture;   // [내일 운세 미리 보기]를 누른 뒤에만 읽는다
 
   InterstitialAd? _interstitial;
 
@@ -160,18 +164,31 @@ class _FortuneScreenState extends State<FortuneScreen> {
       AnalyticsService.fortuneNotifAnswer('no_permission');
     }
     if (!mounted) return;
+    final result = granted
+        ? '내일 아침 7시에 알려 드릴게요.'
+        : '휴대폰 설정에서 알림을 허용해 주세요. 그다음 설정 탭에서 운세 알림을 켤 수 있어요.';
     setState(() {
       _showQuestion = false;
-      _questionResult = granted
-          ? '내일 아침 7시에 알려 드릴게요.'
-          : '휴대폰 설정에서 알림을 허용해 주세요. 그다음 설정 탭에서 운세 알림을 켤 수 있어요.';
+      _questionResult = result;
     });
+    // 질문 상자가 접히면 그 자리 글이 화면 위로 밀려 안 보일 수 있어, 화면 아래에도 잠깐 띄운다
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      duration: const Duration(seconds: 5),
+      content: Text(result, style: const TextStyle(fontSize: SeniorTheme.fontSM, height: 1.4)),
+    ));
   }
 
   void _goToNotices() {
     AnalyticsService.fortuneToNotices();
     _withInterstitial(() {
       if (mounted) Navigator.of(context).pop();
+    });
+  }
+
+  void _peekTomorrow() {
+    AnalyticsService.fortuneTomorrow();
+    setState(() {
+      _tomorrowFuture = (widget.loadTomorrow ?? FortuneRepo.tomorrow)().catchError((_) => null);
     });
   }
 
@@ -287,7 +304,10 @@ class _FortuneScreenState extends State<FortuneScreen> {
         if (day == null || entry == null) {
           return _Preparing(
             failed: snapshot.hasError,
-            onRetry: () => setState(() => _dayFuture = (widget.loadToday ?? FortuneRepo.today)()),
+            // 중괄호 본문이어야 한다 — 화살표로 쓰면 setState가 Future를 돌려받아 디버그에서 오류가 난다
+            onRetry: () => setState(() {
+              _dayFuture = (widget.loadToday ?? FortuneRepo.today)();
+            }),
           );
         }
         final count = _noticeCount;
@@ -318,7 +338,7 @@ class _FortuneScreenState extends State<FortuneScreen> {
               ],
             ),
             const SizedBox(height: 12),
-            _FortuneBody(entry: entry),
+            _ScoreCard(entry: entry),
             if (_showQuestion) ...[
               const SizedBox(height: 16),
               _NotifQuestion(onAnswer: _answerQuestion),
@@ -328,6 +348,16 @@ class _FortuneScreenState extends State<FortuneScreen> {
               Text(_questionResult!,
                   style: const TextStyle(fontSize: SeniorTheme.fontMD, color: SeniorTheme.primary, height: 1.4)),
             ],
+            const SizedBox(height: 12),
+            _AreasCard(entry: entry),
+            const SizedBox(height: 12),
+            _LuckyCard(entry: entry),
+            if (day.ranking.isNotEmpty) ...[
+              const SizedBox(height: 12),
+              _RankingCard(rows: day.ranking, myBranch: zodiacOf(year).branch),
+            ],
+            const SizedBox(height: 12),
+            _TomorrowCard(future: _tomorrowFuture, year: year, onPeek: _peekTomorrow),
             const SizedBox(height: 20),
             OutlinedButton(
               onPressed: _seeOtherAnimal,
@@ -361,10 +391,11 @@ class _FortuneScreenState extends State<FortuneScreen> {
   }
 }
 
-/// 등급·총운·건강·가족·재물·행운 (홈 카드와 같은 데이터)
-class _FortuneBody extends StatelessWidget {
-  final FortuneEntry entry;
-  const _FortuneBody({required this.entry});
+/// 흰 카드 한 장 (운세 화면의 묶음마다 하나)
+class _Section extends StatelessWidget {
+  final String? title;
+  final List<Widget> children;
+  const _Section({this.title, required this.children});
 
   @override
   Widget build(BuildContext context) {
@@ -378,47 +409,280 @@ class _FortuneBody extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(entry.label,
-              style: const TextStyle(
-                fontSize: SeniorTheme.fontXL, fontWeight: FontWeight.bold, color: SeniorTheme.orangeAccent)),
-          const SizedBox(height: 10),
-          Text(entry.headline,
-              style: const TextStyle(
-                fontSize: SeniorTheme.fontLG, fontWeight: FontWeight.bold, color: SeniorTheme.textPrimary, height: 1.4)),
-          const Divider(height: 28),
-          _AreaRow(label: '건강', text: entry.health),
-          _AreaRow(label: '가족', text: entry.family),
-          _AreaRow(label: '재물', text: entry.money),
-          const SizedBox(height: 6),
-          Text('행운의 색 ${entry.color} · 숫자 ${entry.number}',
-              style: const TextStyle(fontSize: SeniorTheme.fontSM, color: SeniorTheme.textSecond)),
+          if (title != null) ...[
+            Text(title!,
+                style: const TextStyle(
+                  fontSize: SeniorTheme.fontMD, fontWeight: FontWeight.bold, color: SeniorTheme.primary)),
+            const SizedBox(height: 12),
+          ],
+          ...children,
         ],
       ),
     );
   }
 }
 
-class _AreaRow extends StatelessWidget {
-  final String label;
-  final String text;
-  const _AreaRow({required this.label, required this.text});
+/// 등급 + 총운 점수 + 총운 (첫 문장은 굵게, 이어지는 문장은 한 문단)
+class _ScoreCard extends StatelessWidget {
+  final FortuneEntry entry;
+  const _ScoreCard({required this.entry});
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 10),
+    return _Section(
+      children: [
+        Wrap(
+          spacing: 12,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          children: [
+            Text(entry.label,
+                style: const TextStyle(
+                  fontSize: SeniorTheme.fontXL, fontWeight: FontWeight.bold, color: SeniorTheme.orangeAccent)),
+            if (entry.score > 0)
+              Text('${entry.score}점',
+                  style: const TextStyle(
+                    fontSize: SeniorTheme.fontXXL, fontWeight: FontWeight.w900, color: SeniorTheme.primary)),
+          ],
+        ),
+        if (entry.rank > 0)
+          Padding(
+            padding: const EdgeInsets.only(top: 2),
+            child: Text('오늘 띠 순위 ${entry.rank}위',
+                style: const TextStyle(fontSize: SeniorTheme.fontSM, color: SeniorTheme.textSecond)),
+          ),
+        const SizedBox(height: 12),
+        Text(entry.headline,
+            style: const TextStyle(
+              fontSize: SeniorTheme.fontLG, fontWeight: FontWeight.bold, color: SeniorTheme.textPrimary, height: 1.4)),
+        if (entry.detail.isNotEmpty) ...[
+          const SizedBox(height: 10),
+          Text(entry.detail.join(' '),
+              style: const TextStyle(fontSize: SeniorTheme.fontMD, color: SeniorTheme.textPrimary, height: 1.6)),
+        ],
+      ],
+    );
+  }
+}
+
+/// 분야별 운세 — 건강·가족·재물·마음, 별점과 한 줄
+class _AreasCard extends StatelessWidget {
+  final FortuneEntry entry;
+  const _AreasCard({required this.entry});
+
+  @override
+  Widget build(BuildContext context) {
+    final rows = [
+      ('건강', 'health', entry.health),
+      ('가족', 'family', entry.family),
+      ('재물', 'money', entry.money),
+      ('마음', 'mind', entry.mind),
+    ].where((r) => r.$3.isNotEmpty).toList();
+    return _Section(
+      title: '분야별 운세',
+      children: [
+        for (var i = 0; i < rows.length; i++)
+          Padding(
+            padding: EdgeInsets.only(bottom: i == rows.length - 1 ? 0 : 14),
+            child: _AreaRow(label: rows[i].$1, stars: entry.stars[rows[i].$2] ?? 0, text: rows[i].$3),
+          ),
+      ],
+    );
+  }
+}
+
+class _AreaRow extends StatelessWidget {
+  final String label;
+  final int stars;      // 0이면 별을 그리지 않는다 (예전 문서)
+  final String text;
+  const _AreaRow({required this.label, required this.stars, required this.text});
+
+  @override
+  Widget build(BuildContext context) {
+    final starSize = 22.0 * MediaQuery.textScalerOf(context).scale(1.0).clamp(1.0, 1.5);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Wrap(
+          spacing: 10,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          children: [
+            Text(label,
+                style: const TextStyle(
+                  fontSize: SeniorTheme.fontMD, fontWeight: FontWeight.bold, color: SeniorTheme.textPrimary)),
+            if (stars > 0)
+              Semantics(
+                label: '별 다섯 개 중 $stars개',
+                excludeSemantics: true,
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    for (var i = 0; i < 5; i++)
+                      Icon(i < stars ? Icons.star_rounded : Icons.star_outline_rounded,
+                          size: starSize, color: i < stars ? SeniorTheme.orangeAccent : SeniorTheme.divider),
+                  ],
+                ),
+              ),
+          ],
+        ),
+        const SizedBox(height: 2),
+        Text(text, style: const TextStyle(fontSize: SeniorTheme.fontMD, color: SeniorTheme.textPrimary, height: 1.4)),
+      ],
+    );
+  }
+}
+
+/// 오늘의 행운 — 색·숫자·방향·시간·음식 + 잘 맞는 띠
+class _LuckyCard extends StatelessWidget {
+  final FortuneEntry entry;
+  const _LuckyCard({required this.entry});
+
+  static String _zodiacText(int branch) => '${zodiacs[branch].emoji} ${zodiacs[branch].name}띠';
+
+  @override
+  Widget build(BuildContext context) {
+    final items = <(String, String)>[
+      ('색', entry.color),
+      ('숫자', entry.number > 0 ? '${entry.number}' : ''),
+      ('방향', entry.direction),
+      ('시간', entry.time),
+      ('음식', entry.food),
+      if (entry.goodWith != null) ('잘 맞는 띠', _zodiacText(entry.goodWith!)),
+      if (entry.careWith != null) ('양보하면 좋은 띠', _zodiacText(entry.careWith!)),
+    ].where((e) => e.$2.isNotEmpty).toList();
+    return _Section(
+      title: '오늘의 행운',
+      children: [
+        for (var i = 0; i < items.length; i++)
+          Padding(
+            padding: EdgeInsets.only(bottom: i == items.length - 1 ? 0 : 8),
+            child: Wrap(
+              spacing: 10,
+              children: [
+                Text(items[i].$1,
+                    style: const TextStyle(fontSize: SeniorTheme.fontMD, color: SeniorTheme.textSecond)),
+                Text(items[i].$2,
+                    style: const TextStyle(
+                      fontSize: SeniorTheme.fontMD, fontWeight: FontWeight.bold, color: SeniorTheme.textPrimary)),
+              ],
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+/// 오늘의 띠 순위 1~12위. 지금 보고 있는 띠 줄을 강조한다
+class _RankingCard extends StatelessWidget {
+  final List<RankRow> rows;
+  final int myBranch;
+  const _RankingCard({required this.rows, required this.myBranch});
+
+  @override
+  Widget build(BuildContext context) {
+    return _Section(
+      title: '오늘의 띠 순위',
+      children: [
+        for (var i = 0; i < rows.length; i++) _row(i + 1, rows[i]),
+      ],
+    );
+  }
+
+  Widget _row(int rank, RankRow row) {
+    final mine = row.branch == myBranch;
+    final z = zodiacs[row.branch];
+    return Container(
+      margin: const EdgeInsets.only(bottom: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: mine ? SeniorTheme.primary.withValues(alpha: 0.08) : null,
+        borderRadius: BorderRadius.circular(10),
+        border: mine ? Border.all(color: SeniorTheme.primary, width: 1.5) : null,
+      ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('$label  ',
-              style: const TextStyle(
-                fontSize: SeniorTheme.fontMD, fontWeight: FontWeight.bold, color: SeniorTheme.primary)),
+          Text('$rank위  ',
+              style: TextStyle(
+                fontSize: SeniorTheme.fontMD,
+                fontWeight: FontWeight.bold,
+                color: rank <= 3 ? SeniorTheme.orangeAccent : SeniorTheme.textSecond)),
           Expanded(
-            child: Text(text,
-                style: const TextStyle(fontSize: SeniorTheme.fontMD, color: SeniorTheme.textPrimary, height: 1.4)),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('${z.emoji} ${z.name}띠${mine ? '  ← 내 띠' : ''}',
+                    style: const TextStyle(
+                      fontSize: SeniorTheme.fontMD, fontWeight: FontWeight.bold, color: SeniorTheme.textPrimary)),
+                if (row.comment.isNotEmpty)
+                  Text(row.comment,
+                      style: const TextStyle(fontSize: SeniorTheme.fontSM, color: SeniorTheme.textSecond)),
+              ],
+            ),
           ),
         ],
       ),
+    );
+  }
+}
+
+/// 내일 운세 미리 보기 — 누르면 내일 문서를 읽어 등급·점수·총운 첫 문장을 보여 준다
+class _TomorrowCard extends StatelessWidget {
+  final Future<FortuneDay?>? future;
+  final int year;
+  final VoidCallback onPeek;
+  const _TomorrowCard({required this.future, required this.year, required this.onPeek});
+
+  @override
+  Widget build(BuildContext context) {
+    if (future == null) {
+      return OutlinedButton(
+        onPressed: onPeek,
+        style: OutlinedButton.styleFrom(
+          minimumSize: const Size.fromHeight(60),
+          backgroundColor: SeniorTheme.surface,
+          side: const BorderSide(color: SeniorTheme.divider, width: 1.5),
+          foregroundColor: SeniorTheme.textPrimary,
+          textStyle: const TextStyle(fontSize: SeniorTheme.fontMD, fontWeight: FontWeight.bold),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(SeniorTheme.cardRadius)),
+        ),
+        child: const Text('🌙 내일 운세 미리 보기'),
+      );
+    }
+    return FutureBuilder<FortuneDay?>(
+      future: future,
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const _Section(
+            title: '내일 운세',
+            children: [Center(child: CircularProgressIndicator(color: SeniorTheme.primary))],
+          );
+        }
+        final day = snapshot.data;
+        final entry = day?.entryFor(year);
+        if (day == null || entry == null) {
+          return const _Section(
+            title: '내일 운세',
+            children: [
+              Text('내일 운세는 아침 7시에 준비돼요.',
+                  style: TextStyle(fontSize: SeniorTheme.fontMD, color: SeniorTheme.textSecond)),
+            ],
+          );
+        }
+        return _Section(
+          title: '내일 운세 · ${day.dateLabel}',
+          children: [
+            Text('${entry.label}${entry.score > 0 ? ' · ${entry.score}점' : ''}',
+                style: const TextStyle(
+                  fontSize: SeniorTheme.fontLG, fontWeight: FontWeight.bold, color: SeniorTheme.orangeAccent)),
+            const SizedBox(height: 8),
+            Text(entry.headline,
+                style: const TextStyle(fontSize: SeniorTheme.fontMD, color: SeniorTheme.textPrimary, height: 1.4)),
+            const SizedBox(height: 8),
+            const Text('자세한 내용은 내일 아침에 볼 수 있어요.',
+                style: TextStyle(fontSize: SeniorTheme.fontSM, color: SeniorTheme.textSecond)),
+          ],
+        );
+      },
     );
   }
 }

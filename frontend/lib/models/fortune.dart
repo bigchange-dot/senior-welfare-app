@@ -30,9 +30,9 @@ Zodiac zodiacOf(int birthYear) => zodiacs[(birthYear - 4) % 12];
 String birthLabel(int birthYear) =>
     '${(birthYear % 100).toString().padLeft(2, '0')}년생 ${zodiacOf(birthYear).name}띠';
 
-/// 오늘 날짜(한국 시간)의 문서 id — "2026-11-18"
-String fortuneDocId([DateTime? now]) {
-  final kst = (now ?? DateTime.now()).toUtc().add(const Duration(hours: 9));
+/// 오늘 날짜(한국 시간)의 문서 id — "2026-11-18". [addDays] 1이면 내일
+String fortuneDocId([DateTime? now, int addDays = 0]) {
+  final kst = (now ?? DateTime.now()).toUtc().add(Duration(hours: 9, days: addDays));
   return '${kst.year}-${kst.month.toString().padLeft(2, '0')}-${kst.day.toString().padLeft(2, '0')}';
 }
 
@@ -46,6 +46,18 @@ class FortuneEntry {
   final String color;
   final int number;
 
+  // 볼거리 보강 (2026-11-21) — 예전 문서에는 없을 수 있어 모두 비어도 된다
+  final int score;                 // 총운 점수 (0이면 없음)
+  final int rank;                  // 오늘 내 띠 순위 1~12 (0이면 없음)
+  final Map<String, int> stars;    // health·family·money·mind → 1~5
+  final List<String> detail;       // 총운에 이어지는 문장들
+  final String mind;
+  final String direction;
+  final String time;
+  final String food;
+  final int? goodWith;             // 잘 맞는 띠 (지지 인덱스)
+  final int? careWith;             // 양보하면 좋은 띠
+
   const FortuneEntry({
     required this.label,
     required this.headline,
@@ -55,7 +67,22 @@ class FortuneEntry {
     required this.money,
     required this.color,
     required this.number,
+    this.score = 0,
+    this.rank = 0,
+    this.stars = const {},
+    this.detail = const [],
+    this.mind = '',
+    this.direction = '',
+    this.time = '',
+    this.food = '',
+    this.goodWith,
+    this.careWith,
   });
+
+  static int? _branch(Object? v) {
+    final i = (v as num?)?.toInt();
+    return (i != null && i >= 0 && i < 12) ? i : null;
+  }
 
   factory FortuneEntry.fromMap(Map<String, dynamic> m) => FortuneEntry(
         label:    m['label']    as String? ?? '',
@@ -66,15 +93,36 @@ class FortuneEntry {
         money:    m['money']    as String? ?? '',
         color:    m['color']    as String? ?? '',
         number:   (m['number'] as num?)?.toInt() ?? 0,
+        score:    (m['score'] as num?)?.toInt() ?? 0,
+        rank:     (m['rank'] as num?)?.toInt() ?? 0,
+        stars: {
+          for (final e in ((m['stars'] as Map?) ?? const {}).entries)
+            e.key as String: ((e.value as num?)?.toInt() ?? 0).clamp(0, 5),
+        },
+        detail:    [for (final t in (m['detail'] as List?) ?? const []) t as String],
+        mind:      m['mind']      as String? ?? '',
+        direction: m['direction'] as String? ?? '',
+        time:      m['time']      as String? ?? '',
+        food:      m['food']      as String? ?? '',
+        goodWith:  _branch(m['good_with']),
+        careWith:  _branch(m['care_with']),
       );
+}
+
+/// 오늘의 띠 순위 한 줄
+class RankRow {
+  final int branch;       // 지지 인덱스 (zodiacs의 자리)
+  final String comment;   // "하는 일마다 술술"
+  const RankRow(this.branch, this.comment);
 }
 
 class FortuneDay {
   final String date;     // "2026-11-18"
   final String iljin;    // "병신"
   final Map<String, FortuneEntry> entries;   // 년주 인덱스("0"~"59") → 운세
+  final List<RankRow> ranking;               // 1위부터 12줄 (예전 문서면 비어 있음)
 
-  const FortuneDay({required this.date, required this.iljin, required this.entries});
+  const FortuneDay({required this.date, required this.iljin, required this.entries, this.ranking = const []});
 
   factory FortuneDay.fromMap(Map<String, dynamic> m) => FortuneDay(
         date:  m['date']  as String? ?? '',
@@ -83,6 +131,11 @@ class FortuneDay {
           for (final e in ((m['entries'] as Map?) ?? const {}).entries)
             e.key as String: FortuneEntry.fromMap(Map<String, dynamic>.from(e.value as Map)),
         },
+        ranking: [
+          for (final r in (m['ranking'] as List?) ?? const [])
+            if (r is Map && FortuneEntry._branch(r['branch']) != null)
+              RankRow(FortuneEntry._branch(r['branch'])!, r['comment'] as String? ?? ''),
+        ],
       );
 
   FortuneEntry? entryFor(int birthYear) => entries['${yearIndex(birthYear)}'];

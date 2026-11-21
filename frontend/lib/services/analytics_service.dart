@@ -45,6 +45,9 @@ class AnalyticsService {
 
   static void fortuneToNotices() => _log('fortune_to_notices');
 
+  /// [내일 운세 미리 보기]를 누름 (볼거리 보강 2026-11-21)
+  static void fortuneTomorrow() => _log('fortune_tomorrow');
+
   /// 공고를 엶. source: notification / list / bookmark
   static void noticeOpen(String source) => _log('notice_open', {'source': source});
 }
