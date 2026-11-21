@@ -51,6 +51,9 @@
     <string>ollama</string>
     <key>GOOGLE_CLOUD_PROJECT</key>
     <string>senior-welfare-app</string>
+    <!-- 경기 52기관 수집 (v1.5.0 Play 게시 확인 후 켬, 2026-11-21) -->
+    <key>GYEONGGI</key>
+    <string>1</string>
   </dict>
 </dict>
 </plist>
