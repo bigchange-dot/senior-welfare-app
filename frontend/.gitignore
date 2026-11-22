@@ -48,3 +48,6 @@ app.*.map.json
 lib/firebase_options.dart
 google-services.json
 GoogleService-Info.plist
+
+# Firebase 기본 값 리소스 (API 키 포함 — firebase_options.dart와 같은 값)
+android/app/src/main/res/values/firebase_values.xml

@@ -145,8 +145,8 @@ def entry_for(day: date, year_idx: int, phrases: dict, ranking: list[int] | None
         "number": _pick(list(numbers), day, year_idx, "number"),
         # 볼거리 보강 (2026-11-21)
         "rank": rank,
-        "score": score_of(level, rank, day, year_idx),
-        "stars": stars_of(level, day, year_idx),
+        "score": (score := score_of(level, rank, day, year_idx)),
+        "stars": stars_of(level, score, day, year_idx),
         "detail": [                               # 총운 이어지는 세 문장
             _pick(phrases["flow"][level], day, year_idx, "flow"),
             _pick(phrases["advice"][god], day, year_idx, "advice"),
@@ -227,10 +227,20 @@ def score_of(level: str, rank: int, day: date, year_idx: int) -> int:
     return base + round((12 - rank) * 1.4) + h % 3
 
 
-def stars_of(level: str, day: date, year_idx: int) -> dict:
-    """분야별 별 (5개 만점). 좋음 3~5, 보통 2~4, 차분히 2~3"""
-    low, high = {"좋음": (3, 5), "보통": (2, 4), "차분히": (2, 3)}[level]
-    return {key: low + _hash_int(f"{day.isoformat()}|{year_idx}|star|{key}") % (high - low + 1)
+def stars_of(level: str, score: int, day: date, year_idx: int) -> dict:
+    """분야별 별 (5개 만점). 점수와 어긋나 보이지 않게 점수대가 후보를 정한다
+    (2026-11-22: 73점·띠 4위인데 네 분야가 모두 별 2개로 나온 것을 태블릿에서 보고 고침)"""
+    if level == "차분히":
+        options = [2, 3, 3]
+    elif score >= 90:
+        options = [4, 5, 5, 4]
+    elif score >= 80:
+        options = [4, 4, 5, 3]
+    elif score >= 70:
+        options = [3, 4, 4, 3]
+    else:
+        options = [3, 3, 2, 4]
+    return {key: options[_hash_int(f"{day.isoformat()}|{year_idx}|star|{key}") % len(options)]
             for key in AREA_KEYS}
 
 

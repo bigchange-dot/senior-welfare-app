@@ -117,6 +117,10 @@ def test_score_and_stars_follow_level():
             assert lo <= e["score"] <= hi, e
             slo, shi = star_ranges[e["level"]]
             assert all(slo <= v <= shi for v in e["stars"].values()), e
+            if e["score"] >= 70:
+                assert min(e["stars"].values()) >= 3, e           # 점수가 괜찮은데 별이 적어 보이지 않게
+            if e["score"] >= 90:
+                assert min(e["stars"].values()) >= 4, e
             seen.add(e["score"])
         first = [e for e in doc["entries"].values() if e["rank"] == 1]
         assert all(e["level"] == "좋음" and e["score"] >= 95 for e in first)      # 1위 띠는 늘 좋은 날

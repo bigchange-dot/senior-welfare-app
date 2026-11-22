@@ -44,6 +44,7 @@ Claude Code가 이 프로젝트에서 작업할 때 반드시 따르는 규칙�
 - `frontend/android/app/upload-keystore.jks` 커밋 금지
 - `frontend/android/app/key.properties` 커밋 금지
 - `frontend/lib/firebase_options.dart` 커밋 금지
+- `frontend/android/app/src/main/res/values/firebase_values.xml` 커밋 금지 (API 키 포함, gitignore됨)
 - 자동 커밋 금지 — 명시적으로 요청받을 때만 커밋
 
 ---
@@ -127,6 +128,10 @@ Claude Code가 이 프로젝트에서 작업할 때 반드시 따르는 규칙�
   약 복용을 전제하지 않는다, 금지어·40자·핵심어 6자는 `tests/test_fortune.py`가 검사
 - 볼거리 (2026-11-21 보강, "한 줄 운세는 재미없다"): 점수·총운 네 문장·분야별 별점(건강·가족·재물·마음)·띠 순위 1~12위·잘 맞는 띠·행운 5가지·내일 미리 보기.
   모두 서버가 계산해 문서에 넣고 앱은 보여 주기만 한다. 띠 순위 아래쪽·'양보하면 좋은 띠'도 권유 말투로 (나쁜 띠라고 하지 않는다)
+- **Analytics는 `res/values/firebase_values.xml`(git 제외)이 있어야 켜진다.** 이 프로젝트는 google-services 플러그인을 쓰지 않아서, 그 파일이 없으면
+  앱은 정상으로 보이는데 로그에 `Missing google_app_id. Firebase Analytics disabled`가 찍히고 아무것도 수집되지 않는다 (1.6.0(11)에서 발견, 12에서 고침).
+  값은 `firebase_options.dart`의 android 값과 똑같아야 한다 — API 키가 다르면 `Firebase.initializeApp`이 duplicate-app 오류. `google-services.json`은 키가 달라 쓰지 않는다.
+  확인: `adb shell setprop log.tag.FA-SVC VERBOSE` 뒤 `adb logcat | grep "Logging event"` (릴리스 빌드에서만 수집)
 - Analytics 이벤트는 `analytics_service.dart` 한 곳에서만 보낸다. 디버그 빌드는 수집 끔, 광고 ID 수집 끔
 - 개인정보처리방침 `docs/privacy-policy.html`은 **master에 푸시하면 GitHub Pages로 바로 공개**된다 — 앱 출시와 맞춰 합칠 것
 
@@ -139,7 +144,7 @@ Claude Code가 이 프로젝트에서 작업할 때 반드시 따르는 규칙�
 ## 출시 상태 (2026-11-19)
 
 - Play 출시본 **1.5.0(10)** (2026-11-21 스토어 페이지에서 확인). 같은 날 launchd plist에 `GYEONGGI=1`을 넣어 경기 수집 시작 — 첫 회차는 알림 없이 저장
-- **1.6.0(11)** 운세(볼거리 보강 포함) + Analytics + 화면 다듬기: 2026-11-22 master에 합침, 출시 파일 빌드 완료(`어르신알리미-1.6.0+11.aab`), Play 데이터 보안 선언 제출함.
+- **1.6.0(11)** 운세(볼거리 보강 포함) + Analytics + 화면 다듬기: 2026-11-22 master에 합침, 출시 파일은 **`어르신알리미-1.6.0+12.aab`** (11은 Analytics가 꺼져 있어 쓰지 않음), Play 데이터 보안 선언 제출함.
   남은 것: 내부 테스트 업로드 → 태블릿 확인 → 프로덕션 심사
 - 출시 파일 보관: `frontend/build/release-keep/` (git 제외). 내부 테스트 링크는 Play Console → 내부 테스트 → 테스터
 - 태블릿 시험: 디버그 빌드와 Play 빌드는 서명이 달라 서로 덮어 설치되지 않음(먼저 제거). 잠금이 있어 화면이 꺼지면 사용자가 풀어야 함 —
