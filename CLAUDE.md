@@ -99,7 +99,8 @@ Claude Code가 이 프로젝트에서 작업할 때 반드시 따르는 규칙�
   - 밀린 공고를 알림 없이 저장하려면 `SILENT_SAVE=1` 추가
   - 경기 52기관까지 수집하려면 `GYEONGGI=1` 추가. **v1.5 앱 출시 전에는 켜지 않는다** (v1.4 사용자는 지역을 못 골라 경기 알림이 모두 감).
     출시 때 launchd plist의 EnvironmentVariables에 `GYEONGGI=1`을 넣고 unload/load
-- 이 폴더가 `v1.5-regions` 브랜치일 때는 그 브랜치의 백엔드가 자동 수집에 쓰인다 — 백엔드는 테스트가 통과하는 상태로만 둘 것
+- 작업 폴더의 백엔드가 그대로 자동 수집에 쓰인다(어느 브랜치든) — 백엔드는 테스트가 통과하는 상태로만 둘 것
+- 수집이 길어지는 중에 맥이 잠들면 Firestore 연결이 끊긴다 → 읽기·쓰기는 `_firestore_retry`로 5·20·60초 재시도 (2026-11-22)
 - Cloud Scheduler `scraping-morning`·`scraping-evening`은 일시정지 상태. 클라우드로 되돌리려면 `gcloud scheduler jobs resume <이름> --location=asia-northeast3`
   — Gemini 충전 필요, 그리고 `scraping_function`이 비공개(`invoker="private"`, 2026-11-17)라 스케줄러 작업에 OIDC 인증을 붙여야 함
 - ⚠️ `scraping_function` 주소로 요청을 보내면 GET·HEAD 가리지 않고 수집이 실제로 실행된다. 확인용 요청 금지
@@ -138,7 +139,8 @@ Claude Code가 이 프로젝트에서 작업할 때 반드시 따르는 규칙�
 ## 출시 상태 (2026-11-19)
 
 - Play 출시본 **1.5.0(10)** (2026-11-21 스토어 페이지에서 확인). 같은 날 launchd plist에 `GYEONGGI=1`을 넣어 경기 수집 시작 — 첫 회차는 알림 없이 저장
-- 1.6.0(11)은 `v1.6-fortune` 브랜치: 운세 + Analytics + 화면 다듬기. 출시 전 Play Console 데이터 보안에 '앱 활동'·'기기 ID'(분석 목적) 추가 필요
+- **1.6.0(11)** 운세(볼거리 보강 포함) + Analytics + 화면 다듬기: 2026-11-22 master에 합침, 출시 파일 빌드 완료(`어르신알리미-1.6.0+11.aab`), Play 데이터 보안 선언 제출함.
+  남은 것: 내부 테스트 업로드 → 태블릿 확인 → 프로덕션 심사
 - 출시 파일 보관: `frontend/build/release-keep/` (git 제외). 내부 테스트 링크는 Play Console → 내부 테스트 → 테스터
 - 태블릿 시험: 디버그 빌드와 Play 빌드는 서명이 달라 서로 덮어 설치되지 않음(먼저 제거). 잠금이 있어 화면이 꺼지면 사용자가 풀어야 함 —
   시험 중 `adb shell svc power stayon usb`, 끝나면 `stayon false`
