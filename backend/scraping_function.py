@@ -75,6 +75,24 @@ def _get_db():
     return _db
 
 
+# Firestore 호출 재시도 (2026-11-22)
+# 경기 첫 수집(11-21 18시)이 AI 판정으로 길어진 사이 맥이 잠들었다 깨면서 연결이 끊겨, 쓰기 한 번이
+# 504 Deadline Exceeded로 실패하고 회차 전체가 중단됐다. 잠깐 쉬었다 다시 하면 되는 오류라 몇 번 더 해 본다.
+_FIRESTORE_RETRY_WAITS = (5, 20, 60)   # 초
+
+
+def _firestore_retry(call, what: str):
+    """call()을 실행하고, Google API 오류면 기다렸다 다시 한다. 끝까지 안 되면 마지막 오류를 그대로 올린다."""
+    from google.api_core import exceptions as gexc
+    for wait in _FIRESTORE_RETRY_WAITS:
+        try:
+            return call()
+        except (gexc.GoogleAPICallError, gexc.RetryError) as e:
+            logger.warning(f"⚠️ Firestore {what} 실패 — {wait}초 뒤 재시도: {type(e).__name__}")
+            time.sleep(wait)
+    return call()
+
+
 # ─────────────────────────────────────────────
 # 유틸리티
 # ─────────────────────────────────────────────
@@ -86,24 +104,25 @@ def make_doc_id(url: str) -> str:
 def is_duplicate(url: str) -> bool:
     """Firestore에 해당 URL 문서가 이미 존재하는지 확인."""
     doc_id = make_doc_id(url)
-    doc = _get_db().collection(FIREBASE_COLLECTION).document(doc_id).get()
+    doc = _firestore_retry(lambda: _get_db().collection(FIREBASE_COLLECTION).document(doc_id).get(), "중복 확인")
     return doc.exists
 
 
 def is_skipped(url: str) -> bool:
     """이전 실행에서 Gemini가 SKIP 판정한 URL인지 확인 (재호출 방지)."""
-    doc = _get_db().collection(SKIPPED_COLLECTION).document(make_doc_id(url)).get()
+    doc = _firestore_retry(lambda: _get_db().collection(SKIPPED_COLLECTION).document(make_doc_id(url)).get(), "SKIP 확인")
     return doc.exists
 
 
 def mark_skipped(title: str, source: str, url: str) -> None:
     """SKIP 판정 URL을 캐시에 기록. 매 실행마다 같은 공고를 Gemini에 다시 보내지 않도록."""
-    _get_db().collection(SKIPPED_COLLECTION).document(make_doc_id(url)).set({
+    data = {
         "title":     title,
         "source":    source,
         "url":       url,
         "timestamp": datetime.now(timezone.utc),
-    })
+    }
+    _firestore_retry(lambda: _get_db().collection(SKIPPED_COLLECTION).document(make_doc_id(url)).set(data), "SKIP 기록")
 
 
 def save_to_firestore(title: str, ai_summary: str, source: str, url: str, silent: bool = False) -> str:
@@ -115,7 +134,7 @@ def save_to_firestore(title: str, ai_summary: str, source: str, url: str, silent
     region  = sources.region_of(source)
     if region is None:
         logger.warning(f"⚠️ 등록표에 없는 출처 — 지역 없이 저장: {source} (sources.py에 추가할 것)")
-    doc_ref.set({
+    _firestore_retry(lambda: doc_ref.set({
         "title":       title,
         "ai_summary":  ai_summary,
         "source":      source,
@@ -124,7 +143,7 @@ def save_to_firestore(title: str, ai_summary: str, source: str, url: str, silent
         "url":         url,
         "timestamp":   datetime.now(timezone.utc),
         "is_notified": SILENT_SAVE or silent,   # True면 알림 함수가 발송을 건너뜀
-    })
+    }), "공고 저장")
     logger.info(f"✅ 저장 완료{'(알림 없음)' if SILENT_SAVE or silent else ''}: [{source}] {ai_summary}")
     return doc_id
 
@@ -171,7 +190,11 @@ def fetch_detail_content(url: str, source: str, title: str = "") -> str:
     """
     limit = llm_judge.CONTENT_CHARS
     try:
-        res = requests.get(url, headers=HEADERS, timeout=10)
+        if requests.utils.urlparse(url).netloc in board_parser.LEGACY_TLS_HOSTS:
+            # 옛 암호화 사이트(수원시니어클럽)는 본문도 목록과 같은 방식으로 — 2026-11-22 첫 수집에서 본문만 실패했음
+            res = board_parser._get(url, HEADERS)
+        else:
+            res = requests.get(url, headers=HEADERS, timeout=10)
         res.raise_for_status()
         # 응답 헤더에 charset이 없으면 requests가 ISO-8859-1로 읽어 한글이 깨짐 (은평노인복지관 등)
         if "charset" not in res.headers.get("content-type", "").lower():

@@ -165,3 +165,45 @@ def test_new_source_saved_silently_then_recorded(monkeypatch):
     assert sorted(calls) == [("강서노인종합복지관", True), ("도봉노인복지관", False)]
     warm = db.collection("system_status").document("source_warmup").get().to_dict()["sources"]
     assert set(warm) == {"도봉노인복지관", "강서노인종합복지관"}
+
+
+# ── Firestore 일시 오류 재시도 (2026-11-22: 맥이 잠든 뒤 504로 회차 전체가 중단됐던 문제) ──
+def test_firestore_retry_recovers_from_transient_error(monkeypatch):
+    from google.api_core import exceptions as gexc
+    import scraping_function as sf
+    waits = []
+    monkeypatch.setattr(sf.time, "sleep", waits.append)
+    calls = {"n": 0}
+
+    def flaky():
+        calls["n"] += 1
+        if calls["n"] <= 2:
+            raise gexc.DeadlineExceeded("504 Deadline Exceeded")
+        return "ok"
+
+    assert sf._firestore_retry(flaky, "시험") == "ok"
+    assert calls["n"] == 3 and waits == [5, 20]
+
+
+def test_firestore_retry_gives_up_and_raises(monkeypatch):
+    from google.api_core import exceptions as gexc
+    import scraping_function as sf
+    monkeypatch.setattr(sf.time, "sleep", lambda s: None)
+    calls = {"n": 0}
+
+    def always():
+        calls["n"] += 1
+        raise gexc.ServiceUnavailable("503")
+
+    import pytest
+    with pytest.raises(gexc.ServiceUnavailable):
+        sf._firestore_retry(always, "시험")
+    assert calls["n"] == 4                      # 처음 + 재시도 3번
+
+    def bug():
+        calls["n"] += 1
+        raise ValueError("코드 오류는 재시도하지 않는다")
+
+    with pytest.raises(ValueError):
+        sf._firestore_retry(bug, "시험")
+    assert calls["n"] == 5
