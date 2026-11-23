@@ -324,6 +324,59 @@ void main() {
       });
     }
 
+    // 1.6.0(12)에서 발견: 앱을 끄지 않고 두었다가 다음 날 열면 홈 카드에 어제 운세가 그대로 보였다
+    Future<void> reopenApp(WidgetTester tester) async {
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('앱을 다시 열 때 날짜가 바뀌었으면 홈 운세 카드를 다시 읽는다', (tester) async {
+      SharedPreferences.setMockInitialValues({'fortune_birth_year': 1956});
+      await FortunePrefs.load();
+      var now = DateTime.utc(2026, 11, 22, 14);   // 한국 11-22 23시
+      var calls = 0;
+      Future<FortuneDay?> load() async {
+        calls++;
+        return fortuneDocId(now) == '2026-11-22' ? fakeDay(date: '2026-11-22') : fakeDay(date: '2026-11-23', rich: false);
+      }
+
+      await tester.pumpWidget(MaterialApp(home: Scaffold(body: FortuneCard(loadToday: load, now: () => now))));
+      await tester.pumpAndSettle();
+      expect(calls, 1);
+      expect(find.text('☀️ 좋은 날 · 뜻밖의 도움 · 88점'), findsOneWidget);
+
+      await reopenApp(tester);   // 같은 날 다시 열기 → 다시 읽지 않음
+      expect(calls, 1);
+
+      now = DateTime.utc(2026, 11, 22, 23);   // 한국 11-23 08시
+      await reopenApp(tester);
+      expect(calls, 2);
+      expect(find.text('☀️ 좋은 날 · 뜻밖의 도움'), findsOneWidget);   // 오늘 문서(점수 없는 형식)로 바뀜
+      expect(find.text('☀️ 좋은 날 · 뜻밖의 도움 · 88점'), findsNothing);
+    });
+
+    testWidgets('운세를 못 읽었으면(오프라인 등) 앱을 다시 열 때 한 번 더 읽는다', (tester) async {
+      SharedPreferences.setMockInitialValues({'fortune_birth_year': 1956});
+      await FortunePrefs.load();
+      var calls = 0;
+      Future<FortuneDay?> load() async {
+        if (++calls == 1) throw Exception('오프라인');
+        return fakeDay();
+      }
+
+      await tester.pumpWidget(MaterialApp(home: Scaffold(body: FortuneCard(loadToday: load))));
+      await tester.pumpAndSettle();
+      expect(find.text('오늘 운세 보기'), findsOneWidget);
+
+      await reopenApp(tester);
+      expect(calls, 2);
+      expect(find.text('☀️ 좋은 날 · 뜻밖의 도움 · 88점'), findsOneWidget);
+
+      await reopenApp(tester);   // 읽은 뒤에는 같은 날 다시 읽지 않음
+      expect(calls, 2);
+    });
+
     testWidgets('띠를 안 골랐으면 카드에 "내 띠 운세 보기"', (tester) async {
       SharedPreferences.setMockInitialValues({});
       await FortunePrefs.load();

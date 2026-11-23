@@ -8,11 +8,59 @@ import '../theme.dart';
 
 /// 홈 위쪽 운세 카드 (v1.6). 띠를 안 골랐으면 "내 띠 운세 보기", 골랐으면 오늘 등급과 핵심어.
 /// 누르면 운세 화면으로 간다.
-class FortuneCard extends StatelessWidget {
+///
+/// 앱을 끄지 않고 두었다가 다음 날 다시 열면 어제 운세가 그대로 보이던 문제(1.6.0(12)에서 발견) →
+/// 앱이 다시 앞으로 올 때 날짜가 바뀌었으면 오늘 문서를 다시 읽는다.
+class FortuneCard extends StatefulWidget {
   /// 테스트에서 Firestore 대신 쓰는 구멍
   final Future<FortuneDay?> Function()? loadToday;
 
-  const FortuneCard({super.key, this.loadToday});
+  /// 테스트에서 날짜를 바꿔 보는 구멍 (기본: 지금 시각)
+  final DateTime Function()? now;
+
+  const FortuneCard({super.key, this.loadToday, this.now});
+
+  @override
+  State<FortuneCard> createState() => _FortuneCardState();
+}
+
+class _FortuneCardState extends State<FortuneCard> with WidgetsBindingObserver {
+  Future<FortuneDay?>? _future;
+  String? _loadedFor;   // 마지막으로 읽은 날짜 (fortunes 문서 id)
+  bool _got = false;    // 읽기에 성공했는지 — 실패(오프라인 등)했으면 다시 열 때 한 번 더 읽는다
+
+  String _todayId() => fortuneDocId(widget.now?.call());
+
+  Future<FortuneDay?> _load() {
+    _loadedFor = _todayId();
+    _got = false;
+    if (kIsWeb && widget.loadToday == null) return Future.value(null);
+    return (widget.loadToday ?? FortuneRepo.today)().then<FortuneDay?>((day) {
+      _got = day != null;
+      return day;
+    }).catchError((_) => null);
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && _future != null && (_loadedFor != _todayId() || !_got)) {
+      setState(() {
+        _future = _load();
+      });
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -27,8 +75,10 @@ class FortuneCard extends StatelessWidget {
             onTap: () => _open(context),
           );
         }
+        // 띠를 처음 고른 뒤에 읽기 시작. 같은 날은 다시 읽지 않는다 (띠를 바꿔도 같은 날 문서에 다 있음)
+        _future ??= _load();
         return FutureBuilder<FortuneDay?>(
-          future: kIsWeb && loadToday == null ? Future.value(null) : (loadToday ?? FortuneRepo.today)().catchError((_) => null),
+          future: _future,
           builder: (context, snapshot) {
             final entry = snapshot.data?.entryFor(year);
             return _CardShell(
